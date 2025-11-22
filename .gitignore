@@ -1,3 +1,10 @@
+firebase-service-account.json
+*.json
+!google-services.json
+
+.env
+google-services.json
+
 # Miscellaneous
 *.class
 *.log
