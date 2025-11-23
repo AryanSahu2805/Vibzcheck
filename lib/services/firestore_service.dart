@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../utils/logger.dart';
 import 'dart:math';
 import '../models/playlist_model.dart';
 import '../models/song_model.dart';
@@ -68,7 +70,7 @@ class FirestoreService {
       
       return docRef.id;
     } catch (e) {
-      print('❌ Create playlist error: $e');
+      Logger.info('❌ Create playlist error: $e');
       rethrow;
     }
   }
@@ -86,23 +88,92 @@ class FirestoreService {
       }
       return null;
     } catch (e) {
-      print('❌ Get playlist error: $e');
+      Logger.info('❌ Get playlist error: $e');
       return null;
     }
   }
   
-  // Get user's playlists
-  Stream<List<PlaylistModel>> getUserPlaylists(String userId) {
+  // Get playlist stream
+  Stream<PlaylistModel?> getPlaylistStream(String playlistId) {
     return _firestore
         .collection(AppConstants.playlistsCollection)
-        .where('participants', arrayContains: {
-          'userId': userId,
-        })
-        .orderBy('updatedAt', descending: true)
+        .doc(playlistId)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => PlaylistModel.fromFirestore(doc))
-            .toList());
+        .map((doc) {
+      if (doc.exists) {
+        return PlaylistModel.fromFirestore(doc);
+      }
+      return null;
+    });
+  }
+  
+  // Get user's playlists by reading user's playlistIds and fetching those docs.
+  // This is more reliable than using arrayContains on a map element (which requires exact map match).
+  Stream<List<PlaylistModel>> getUserPlaylists(String userId) {
+    final userDocRef = _firestore.collection(AppConstants.usersCollection).doc(userId);
+
+    return userDocRef.snapshots().asyncExpand((userSnap) async* {
+      final userData = userSnap.data();
+      final rawIds = (userData != null && userData['playlistIds'] is List)
+          ? List.from(userData['playlistIds']).where((e) => e != null).map((e) => e.toString()).toList()
+          : <String>[];
+
+      if (rawIds.isEmpty) {
+        yield <PlaylistModel>[];
+        return;
+      }
+
+      // Firestore 'whereIn' supports up to 10 elements per query. Chunk if necessary.
+      const chunkSize = 10;
+      final chunks = <List<String>>[];
+      for (var i = 0; i < rawIds.length; i += chunkSize) {
+        chunks.add(rawIds.sublist(i, i + chunkSize > rawIds.length ? rawIds.length : i + chunkSize));
+      }
+
+      // Create snapshot streams for all chunks
+      final playlistSnapshots = <Stream<QuerySnapshot<Map<String, dynamic>>>>[
+        for (final chunk in chunks)
+          _firestore
+              .collection(AppConstants.playlistsCollection)
+              .where(FieldPath.documentId, whereIn: chunk)
+              .snapshots(),
+      ];
+
+      // Create a controller to combine all chunk streams
+      final controller = StreamController<List<PlaylistModel>>();
+      final subscriptions = <StreamSubscription>[];
+      final latestSnaps = <int, QuerySnapshot<Map<String, dynamic>>>{};
+
+      // Subscribe to all chunk streams
+      for (var i = 0; i < playlistSnapshots.length; i++) {
+        subscriptions.add(playlistSnapshots[i].listen((snap) {
+          latestSnaps[i] = snap;
+          
+          // Aggregate results from all chunks that have at least one snapshot
+          final allResults = <PlaylistModel>[];
+          for (final snap in latestSnaps.values) {
+            allResults.addAll(snap.docs.map((d) => PlaylistModel.fromFirestore(d)));
+          }
+          
+          // Sort by updatedAt descending
+          allResults.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          controller.add(allResults);
+        }, onError: (e) {
+          controller.addError(e);
+        }));
+      }
+
+      // Listen to the controller and yield its events
+      await for (final result in controller.stream) {
+        yield result;
+      }
+
+      // Cleanup
+      for (final sub in subscriptions) {
+        await sub.cancel();
+      }
+      await controller.close();
+    });
   }
   
   // Join playlist by share code
@@ -147,7 +218,7 @@ class FirestoreService {
       
       return playlistDoc.id;
     } catch (e) {
-      print('❌ Join playlist error: $e');
+      Logger.info('❌ Join playlist error: $e');
       rethrow;
     }
   }
@@ -174,7 +245,7 @@ class FirestoreService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('❌ Add song error: $e');
+      Logger.info('❌ Add song error: $e');
       rethrow;
     }
   }
@@ -241,7 +312,7 @@ class FirestoreService {
           .doc(playlistId)
           .update({'updatedAt': FieldValue.serverTimestamp()});
     } catch (e) {
-      print('❌ Vote song error: $e');
+      Logger.info('❌ Vote song error: $e');
       rethrow;
     }
   }
@@ -278,7 +349,7 @@ class FirestoreService {
         'voteScore': voteScore,
       });
     } catch (e) {
-      print('❌ Remove vote error: $e');
+      Logger.info('❌ Remove vote error: $e');
       rethrow;
     }
   }
@@ -301,7 +372,7 @@ class FirestoreService {
           .doc(playlistId)
           .update({'updatedAt': FieldValue.serverTimestamp()});
     } catch (e) {
-      print('❌ Send message error: $e');
+      Logger.info('❌ Send message error: $e');
       rethrow;
     }
   }
@@ -344,7 +415,7 @@ class FirestoreService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('❌ Delete song error: $e');
+      Logger.info('❌ Delete song error: $e');
       rethrow;
     }
   }
@@ -380,7 +451,7 @@ class FirestoreService {
         'playlistIds': FieldValue.arrayRemove([playlistId]),
       });
     } catch (e) {
-      print('❌ Leave playlist error: $e');
+      Logger.info('❌ Leave playlist error: $e');
       rethrow;
     }
   }

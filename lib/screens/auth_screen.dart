@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/theme.dart';
 import '../config/routes.dart';
-import '../providers/auth_provider.dart';
+import '../providers/providers.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
 import '../utils/validators.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
-  const AuthScreen({Key? key}) : super(key: key);
+  const AuthScreen({super.key});
 
   @override
   ConsumerState<AuthScreen> createState() => _AuthScreenState();
@@ -22,6 +22,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   
   bool _isLogin = true;
   bool _obscurePassword = true;
+  bool _showSpotifyOption = false;
+  bool _connectingSpotify = false;
 
   @override
   void dispose() {
@@ -48,20 +50,115 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         password: _passwordController.text,
         displayName: _nameController.text.trim(),
       );
+      // Show Spotify option after successful signup
+      if (success && mounted) {
+        setState(() => _showSpotifyOption = true);
+      }
     }
 
-    if (success && mounted) {
+    if (success && mounted && _isLogin) {
       AppRoutes.navigateToHome(context);
-    } else if (mounted) {
+    } else if (!success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(ref.read(authProviderInstance).error ?? 'Error')),
       );
     }
   }
 
+  Future<void> _connectSpotify() async {
+    setState(() => _connectingSpotify = true);
+    final authProvider = ref.read(authProviderInstance.notifier);
+    try {
+      final success = await authProvider.connectSpotify();
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Spotify connected successfully!'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+        // Navigate to home after Spotify connection
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            AppRoutes.navigateToHome(context);
+          }
+        });
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ref.read(authProviderInstance).error ?? 'Failed to connect Spotify'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        setState(() => _connectingSpotify = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        setState(() => _connectingSpotify = false);
+      }
+    }
+  }
+
+  void _skipSpotify() {
+    AppRoutes.navigateToHome(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProviderInstance);
+
+    // Show Spotify connection screen after signup
+    if (_showSpotifyOption && !_isLogin) {
+      return Scaffold(
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 64),
+                const Icon(Icons.music_note, size: 80, color: AppTheme.primaryColor),
+                const SizedBox(height: 24),
+                Text(
+                  'Connect Spotify',
+                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Enhance your music experience by connecting your Spotify account. This allows you to search and add songs from Spotify to your playlists.',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 48),
+                CustomButton(
+                  text: 'Connect Spotify',
+                  onPressed: _connectSpotify,
+                  isLoading: _connectingSpotify,
+                ),
+                const SizedBox(height: 12),
+                CustomButton(
+                  text: 'Skip for Now',
+                  onPressed: _skipSpotify,
+                  variant: ButtonVariant.outlined,
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -73,7 +170,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 48),
-                Icon(Icons.music_note, size: 80, color: AppTheme.primaryColor),
+                const Icon(Icons.music_note, size: 80, color: AppTheme.primaryColor),
                 const SizedBox(height: 16),
                 Text(
                   'Vibzcheck',
@@ -139,5 +236,3 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     );
   }
 }
-
-final authProviderInstance = ChangeNotifierProvider((ref) => AuthProvider());

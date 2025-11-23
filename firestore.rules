@@ -1,0 +1,121 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get current user ID
+    function currentUserId() {
+      return request.auth.uid;
+    }
+    
+    // Helper function to check if user is playlist participant
+    function isPlaylistParticipant(playlistId) {
+      let playlist = get(/databases/$(database)/documents/playlists/$(playlistId));
+      return isAuthenticated() && 
+             playlist != null &&
+             playlist.data.participants.hasAny([{'userId': currentUserId()}]);
+    }
+    
+    // Helper function to check if user is playlist creator
+    function isPlaylistCreator(playlistId) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/playlists/$(playlistId)) &&
+             get(/databases/$(database)/documents/playlists/$(playlistId)).data.creatorId == currentUserId();
+    }
+    
+    // Users Collection
+    match /users/{userId} {
+      // Users can read any user profile
+      allow read: if isAuthenticated();
+      
+      // Users can only create/update their own profile
+      allow create: if isAuthenticated() && currentUserId() == userId;
+      allow update: if isAuthenticated() && currentUserId() == userId;
+      allow delete: if isAuthenticated() && currentUserId() == userId;
+    }
+    
+    // Playlists Collection
+    match /playlists/{playlistId} {
+      // Anyone authenticated can read public playlists
+      // Only participants can read private playlists
+      allow read: if isAuthenticated() && (
+        resource.data.isPublic == true ||
+        isPlaylistParticipant(playlistId)
+      );
+      
+      // Only authenticated users can create playlists
+      allow create: if isAuthenticated() && 
+                       currentUserId() == request.resource.data.creatorId;
+      
+      // Only creator can update playlist details
+      // Participants can update song count and timestamp
+      allow update: if isAuthenticated() && (
+        isPlaylistCreator(playlistId) ||
+        (isPlaylistParticipant(playlistId) && 
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['songCount', 'updatedAt', 'participants']))
+      );
+      
+      // Only creator can delete playlist
+      allow delete: if isAuthenticated() && isPlaylistCreator(playlistId);
+      
+      // Songs Subcollection
+      match /songs/{songId} {
+        // Participants can read songs
+        allow read: if isAuthenticated() && isPlaylistParticipant(playlistId);
+        
+        // Participants can add songs
+        allow create: if isAuthenticated() && 
+                         isPlaylistParticipant(playlistId) &&
+                         currentUserId() == request.resource.data.addedByUserId;
+        
+        // Anyone can update vote scores (for voting)
+        // Only song adder can update other fields
+        allow update: if isAuthenticated() && isPlaylistParticipant(playlistId) && (
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['voteScore', 'upvoters', 'downvoters', 'updatedAt']) ||
+          currentUserId() == resource.data.addedByUserId
+        );
+        
+        // Only song adder or playlist creator can delete
+        allow delete: if isAuthenticated() && isPlaylistParticipant(playlistId) && (
+          currentUserId() == resource.data.addedByUserId ||
+          isPlaylistCreator(playlistId)
+        );
+      }
+      
+      // Chat Messages Subcollection
+      match /chats/{messageId} {
+        // Participants can read messages
+        allow read: if isAuthenticated() && isPlaylistParticipant(playlistId);
+        
+        // Participants can send messages
+        allow create: if isAuthenticated() && 
+                         isPlaylistParticipant(playlistId) &&
+                         currentUserId() == request.resource.data.userId;
+        
+        // Only message sender can update their message
+        allow update: if isAuthenticated() && 
+                         isPlaylistParticipant(playlistId) &&
+                         currentUserId() == resource.data.userId;
+        
+        // Only message sender or playlist creator can delete
+        allow delete: if isAuthenticated() && isPlaylistParticipant(playlistId) && (
+          currentUserId() == resource.data.userId ||
+          isPlaylistCreator(playlistId)
+        );
+      }
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

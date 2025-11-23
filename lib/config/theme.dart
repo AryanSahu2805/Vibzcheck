@@ -43,12 +43,10 @@ class AppTheme {
       colorScheme: const ColorScheme.dark(
         primary: primaryColor,
         secondary: secondaryColor,
-        background: backgroundColor,
         surface: surfaceColor,
         error: errorColor,
         onPrimary: Colors.white,
         onSecondary: Colors.white,
-        onBackground: textPrimary,
         onSurface: textPrimary,
         onError: Colors.white,
       ),
@@ -68,7 +66,7 @@ class AppTheme {
       ),
       
       // Card Theme
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 4,
         color: cardColor,
         shape: RoundedRectangleBorder(
@@ -184,7 +182,7 @@ class AppTheme {
       ),
       
       // Dialog Theme
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: cardColor,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),

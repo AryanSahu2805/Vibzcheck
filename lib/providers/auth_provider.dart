@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/logger.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
@@ -22,15 +23,27 @@ class AuthProvider with ChangeNotifier {
   }
   
   Future<void> _init() async {
-    _authService.authStateChanges.listen((User? user) async {
-      if (user != null) {
-        _currentUser = await _authService.getUserData(user.uid);
-        notifyListeners();
-      } else {
-        _currentUser = null;
-        notifyListeners();
-      }
-    });
+    try {
+      _authService.authStateChanges.listen((User? user) async {
+        try {
+          if (user != null) {
+            _currentUser = await _authService.getUserData(user.uid);
+            notifyListeners();
+          } else {
+            _currentUser = null;
+            notifyListeners();
+          }
+        } catch (e) {
+          Logger.info('❌ Error in auth state listener: $e');
+          _currentUser = null;
+          notifyListeners();
+        }
+      });
+    } catch (e) {
+      Logger.info('❌ Error initializing auth provider: $e');
+      _currentUser = null;
+      notifyListeners();
+    }
   }
   
   Future<bool> signUp({
@@ -94,21 +107,35 @@ class AuthProvider with ChangeNotifier {
   
   Future<bool> connectSpotify() async {
     try {
+      Logger.info('📱 Connecting to Spotify...');
       final success = await _spotifyService.authorize();
+      Logger.debug('authorize() returned: $success');
       if (success) {
+        Logger.info('Getting Spotify profile...');
         final profile = await _spotifyService.getUserProfile();
         if (profile != null) {
+          Logger.info('Linking Spotify account to user...');
           await _authService.linkSpotifyAccount(
             spotifyId: profile['id'],
             spotifyData: profile,
           );
           _currentUser = await _authService.getUserData(_currentUser!.uid);
+          _error = null;
+          Logger.success('✅ Spotify account linked successfully');
           notifyListeners();
+        } else {
+          Logger.error('Could not fetch Spotify profile after authorization');
+          _error = 'Could not fetch Spotify profile';
         }
+      } else {
+        Logger.warning('Spotify authorization failed');
+        _error = 'Spotify authorization failed. Check logs for details.';
       }
+      notifyListeners();
       return success;
-    } catch (e) {
-      _error = e.toString();
+    } catch (e, st) {
+      Logger.error('connectSpotify error', e, st);
+      _error = 'Connection error: $e';
       notifyListeners();
       return false;
     }
@@ -130,6 +157,13 @@ class AuthProvider with ChangeNotifier {
       _error = e.toString();
       notifyListeners();
       return false;
+    }
+  }
+  
+  Future<void> refreshUser() async {
+    if (_currentUser != null) {
+      _currentUser = await _authService.getUserData(_currentUser!.uid);
+      notifyListeners();
     }
   }
   

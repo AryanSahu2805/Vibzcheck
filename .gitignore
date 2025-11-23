@@ -1,3 +1,24 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+/.gradle
+/.pub-cache
+build/
+/.idea/
+/.vscode/
+*.iml
+
+# iOS
+Pods/
+Runner.xcworkspace/
+
+# Android
+local.properties
+
+# Environment file (contains secrets)
+.env
 firebase-service-account.json
 *.json
 !google-services.json

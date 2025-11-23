@@ -1,42 +1,48 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // Google Services plugin for Firebase
     id("com.google.gms.google-services")
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+
+val flutterVersionCode = localProperties.getProperty("flutter.versionCode")?.toIntOrNull() ?: 1
+val flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0"
+
 android {
-    namespace = "com.vibzcheck.app"  // IMPORTANT: Must match package name in google-services.json
-    compileSdk = 34  // Updated to 34
-    ndkVersion = flutter.ndkVersion
+    namespace = "com.vibzcheck.app"
+    compileSdk = 36
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = "17"
+        languageVersion = "1.9"
     }
 
     defaultConfig {
-        applicationId = "com.vibzcheck.app"  // IMPORTANT: Must match package name in google-services.json
-        
-        // Updated SDK versions for Firebase compatibility
-        minSdk = 23  // Firebase requires minimum 23
+        applicationId = "com.vibzcheck.app"
+        minSdk = 24
         targetSdk = 34
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
-        
-        // Enable multidex for Firebase
+        versionCode = flutterVersionCode
+        versionName = flutterVersionName
         multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -47,16 +53,8 @@ flutter {
 }
 
 dependencies {
-    // Import the Firebase BoM (Bill of Materials)
-    implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
-    
-    // Firebase products - versions managed by BoM
-    implementation("com.google.firebase:firebase-analytics-ktx")
-    implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.firebase:firebase-storage-ktx")
-    implementation("com.google.firebase:firebase-messaging-ktx")
-    
-    // Multidex support
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation("com.google.firebase:firebase-analytics")
     implementation("androidx.multidex:multidex:2.0.1")
 }

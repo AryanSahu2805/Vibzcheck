@@ -9,6 +9,7 @@ import '../screens/chat_screen.dart';
 import '../screens/search_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/analytics_screen.dart';
+import '../screens/settings_screen.dart';
 
 class AppRoutes {
   // Route names
@@ -18,14 +19,15 @@ class AppRoutes {
   static const String home = '/home';
   static const String playlistView = '/playlist-view';
   static const String createPlaylist = '/create-playlist';
+  static const String settings = '/settings';
   static const String chat = '/chat';
   static const String search = '/search';
   static const String profile = '/profile';
   static const String analytics = '/analytics';
   
   // Route generator
-  static Route<dynamic> generateRoute(RouteSettings settings) {
-    switch (settings.name) {
+  static Route<dynamic> generateRoute(RouteSettings routeSettings) {
+    switch (routeSettings.name) {
       case splash:
         return MaterialPageRoute(
           builder: (_) => const SplashScreen(),
@@ -47,7 +49,7 @@ class AppRoutes {
         );
         
       case playlistView:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final args = routeSettings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => PlaylistViewScreen(
             playlistId: args?['playlistId'] ?? '',
@@ -60,7 +62,7 @@ class AppRoutes {
         );
         
       case chat:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final args = routeSettings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => ChatScreen(
             playlistId: args?['playlistId'] ?? '',
@@ -69,7 +71,7 @@ class AppRoutes {
         );
         
       case search:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final args = routeSettings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => SearchScreen(
             playlistId: args?['playlistId'],
@@ -77,7 +79,7 @@ class AppRoutes {
         );
         
       case profile:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final args = routeSettings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => ProfileScreen(
             userId: args?['userId'],
@@ -85,18 +87,23 @@ class AppRoutes {
         );
         
       case analytics:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final args = routeSettings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => AnalyticsScreen(
             playlistId: args?['playlistId'] ?? '',
           ),
         );
         
+      case settings:
+        return MaterialPageRoute(
+          builder: (_) => const SettingsScreen(),
+        );
+        
       default:
         return MaterialPageRoute(
           builder: (_) => Scaffold(
             body: Center(
-              child: Text('No route defined for ${settings.name}'),
+              child: Text('No route defined for ${routeSettings.name}'),
             ),
           ),
         );
@@ -165,5 +172,9 @@ class AppRoutes {
       analytics,
       arguments: {'playlistId': playlistId},
     );
+  }
+  
+  static void navigateToSettings(BuildContext context) {
+    Navigator.pushNamed(context, settings);
   }
 }

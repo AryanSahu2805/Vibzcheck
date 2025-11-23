@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:cloudinary_public/cloudinary_public.dart';
+import '../utils/logger.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/constants.dart';
 
@@ -8,11 +8,27 @@ class CloudinaryService {
   final ImagePicker _picker = ImagePicker();
   
   CloudinaryService() {
-    _cloudinary = CloudinaryPublic(
-      AppConstants.cloudinaryCloudName,
-      AppConstants.cloudinaryUploadPreset,
-      cache: false,
-    );
+    // REQUIRED - Initialize Cloudinary with credentials
+    final cloudName = AppConstants.cloudinaryCloudName;
+    final uploadPreset = AppConstants.cloudinaryUploadPreset;
+    
+    if (cloudName.isEmpty || uploadPreset.isEmpty) {
+      throw Exception(
+        'Cloudinary credentials not configured. '
+        'Please set CLOUDINARY_CLOUD_NAME and CLOUDINARY_UPLOAD_PRESET in .env file.'
+      );
+    }
+    
+    try {
+      _cloudinary = CloudinaryPublic(
+        cloudName,
+        uploadPreset,
+        cache: false,
+      );
+      Logger.info('✅ Cloudinary initialized');
+    } catch (e) {
+      throw Exception('Failed to initialize Cloudinary: $e');
+    }
   }
   
   // Upload profile picture
@@ -37,7 +53,7 @@ class CloudinaryService {
       
       return response.secureUrl;
     } catch (e) {
-      print('❌ Upload profile picture error: $e');
+      Logger.info('❌ Upload profile picture error: $e');
       return null;
     }
   }
@@ -64,7 +80,7 @@ class CloudinaryService {
       
       return response.secureUrl;
     } catch (e) {
-      print('❌ Upload playlist cover error: $e');
+      Logger.info('❌ Upload playlist cover error: $e');
       return null;
     }
   }
@@ -82,23 +98,17 @@ class CloudinaryService {
       
       return response.secureUrl;
     } catch (e) {
-      print('❌ Upload image error: $e');
+      Logger.info('❌ Upload image error: $e');
       return null;
     }
   }
   
   // Delete image
+  // Note: CloudinaryPublic doesn't support deleteFile method
+  // If deletion is needed, use cloudinary_sdk package or implement via HTTP API
   Future<bool> deleteImage(String publicId) async {
-    try {
-      await _cloudinary.deleteFile(
-        publicId: publicId,
-        resourceType: CloudinaryResourceType.Image,
-        invalidate: true,
-      );
-      return true;
-    } catch (e) {
-      print('❌ Delete image error: $e');
-      return false;
-    }
+    // TODO: Implement deletion using cloudinary_sdk or HTTP API if needed
+    Logger.warning('Delete image not implemented - CloudinaryPublic doesn\'t support deletion');
+    return false;
   }
 }

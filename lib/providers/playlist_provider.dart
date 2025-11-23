@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../models/playlist_model.dart';
 import '../models/song_model.dart';
 import '../services/firestore_service.dart';
@@ -10,17 +11,24 @@ class PlaylistProvider with ChangeNotifier {
   final NotificationService _notificationService = NotificationService();
   final SpotifyService _spotifyService = SpotifyService();
   
-  List<PlaylistModel> _playlists = [];
+  final List<PlaylistModel> _playlists = [];
   PlaylistModel? _currentPlaylist;
   List<SongModel> _currentSongs = [];
   bool _isLoading = false;
   String? _error;
+  StreamSubscription<List<SongModel>>? _songsSubscription;
   
   List<PlaylistModel> get playlists => _playlists;
   PlaylistModel? get currentPlaylist => _currentPlaylist;
   List<SongModel> get currentSongs => _currentSongs;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  
+  @override
+  void dispose() {
+    _songsSubscription?.cancel();
+    super.dispose();
+  }
   
   Future<String?> createPlaylist({
     required String name,
@@ -58,16 +66,27 @@ class PlaylistProvider with ChangeNotifier {
   
   Future<void> loadPlaylist(String playlistId) async {
     try {
+      // Cancel previous subscription
+      await _songsSubscription?.cancel();
+      _songsSubscription = null;
+      
       _currentPlaylist = await _firestoreService.getPlaylist(playlistId);
+      _isLoading = true;
       notifyListeners();
       
-      // Listen to songs
-      _firestoreService.getPlaylistSongs(playlistId).listen((songs) {
+      // Listen to songs with new subscription
+      _songsSubscription = _firestoreService.getPlaylistSongs(playlistId).listen((songs) {
         _currentSongs = songs;
+        _isLoading = false;
+        notifyListeners();
+      }, onError: (e) {
+        _error = e.toString();
+        _isLoading = false;
         notifyListeners();
       });
     } catch (e) {
       _error = e.toString();
+      _isLoading = false;
       notifyListeners();
     }
   }

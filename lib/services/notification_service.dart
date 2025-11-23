@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../utils/logger.dart';
 import 'fcm_service.dart';
 import '../config/constants.dart';
 
@@ -31,7 +32,7 @@ class NotificationService {
         },
       );
     } catch (e) {
-      print('❌ Send song added notification error: $e');
+      Logger.info('❌ Send song added notification error: $e');
     }
   }
   
@@ -55,7 +56,7 @@ class NotificationService {
         },
       );
     } catch (e) {
-      print('❌ Send vote notification error: $e');
+      Logger.info('❌ Send vote notification error: $e');
     }
   }
   
@@ -80,7 +81,7 @@ class NotificationService {
         },
       );
     } catch (e) {
-      print('❌ Send mention notification error: $e');
+      Logger.info('❌ Send mention notification error: $e');
     }
   }
   
@@ -107,7 +108,7 @@ class NotificationService {
         },
       );
     } catch (e) {
-      print('❌ Send user joined notification error: $e');
+      Logger.info('❌ Send user joined notification error: $e');
     }
   }
   
@@ -141,7 +142,7 @@ class NotificationService {
       
       return tokens;
     } catch (e) {
-      print('❌ Get participant tokens error: $e');
+      Logger.info('❌ Get participant tokens error: $e');
       return [];
     }
   }
@@ -156,7 +157,7 @@ class NotificationService {
       
       return userDoc.data()?['fcmToken'] as String?;
     } catch (e) {
-      print('❌ Get user FCM token error: $e');
+      Logger.info('❌ Get user FCM token error: $e');
       return null;
     }
   }

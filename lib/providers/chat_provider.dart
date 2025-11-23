@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/logger.dart';
 import '../models/chat_message_model.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
@@ -7,15 +8,16 @@ class ChatProvider with ChangeNotifier {
   final FirestoreService _firestoreService = FirestoreService();
   final NotificationService _notificationService = NotificationService();
   
-  List<ChatMessageModel> _messages = [];
-  bool _isLoading = false;
+  final List<ChatMessageModel> _messages = [];
+  final bool _isLoading = false;
   
   List<ChatMessageModel> get messages => _messages;
   bool get isLoading => _isLoading;
   
   void loadMessages(String playlistId) {
     _firestoreService.getChatMessages(playlistId).listen((messages) {
-      _messages = messages;
+      _messages.clear();
+      _messages.addAll(messages);
       notifyListeners();
     });
   }
@@ -58,7 +60,7 @@ class ChatProvider with ChangeNotifier {
         );
       }
     } catch (e) {
-      print('❌ Send message error: $e');
+      Logger.info('❌ Send message error: $e');
     }
   }
   

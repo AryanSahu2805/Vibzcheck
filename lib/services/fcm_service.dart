@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import '../utils/logger.dart';
 import 'package:http/http.dart' as http;
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -38,7 +38,7 @@ class FCMService {
       
       return _accessToken!;
     } catch (e) {
-      print('❌ Get access token error: $e');
+      Logger.info('❌ Get access token error: $e');
       rethrow;
     }
   }
@@ -79,14 +79,14 @@ class FCMService {
       );
       
       if (response.statusCode == 200) {
-        print('✅ Notification sent successfully');
+        Logger.info('✅ Notification sent successfully');
         return true;
       } else {
-        print('❌ Failed to send notification: ${response.body}');
+        Logger.info('❌ Failed to send notification: ${response.body}');
         return false;
       }
     } catch (e) {
-      print('❌ Send notification error: $e');
+      Logger.info('❌ Send notification error: $e');
       return false;
     }
   }

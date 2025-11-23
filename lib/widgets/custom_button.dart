@@ -12,14 +12,14 @@ class CustomButton extends StatelessWidget {
   final Color? color;
 
   const CustomButton({
-    Key? key,
+    super.key,
     required this.text,
     this.onPressed,
     this.isLoading = false,
     this.icon,
     this.variant = ButtonVariant.filled,
     this.color,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -69,10 +69,17 @@ class CustomButton extends StatelessWidget {
     if (icon != null) {
       return Row(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, size: 20),
           const SizedBox(width: 8),
-          Text(text),
+          Flexible(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
         ],
       );
     }

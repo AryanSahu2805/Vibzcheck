@@ -46,7 +46,7 @@ class Helpers {
     if (hours > 0) {
       return '$hours:${twoDigits(minutes)}:${twoDigits(seconds)}';
     }
-    return '${minutes}:${twoDigits(seconds)}';
+    return '$minutes:${twoDigits(seconds)}';
   }
 
   // Capitalize first letter

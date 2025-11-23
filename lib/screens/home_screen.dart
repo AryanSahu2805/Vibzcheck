@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/theme.dart';
 import '../config/routes.dart';
-import '../providers/auth_provider.dart';
-import '../providers/playlist_provider.dart';
+import '../models/playlist_model.dart';
+import '../providers/providers.dart';
 import '../widgets/playlist_card.dart';
 import '../widgets/custom_button.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -44,25 +44,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           TextButton(
             onPressed: () async {
+              if (!mounted) return;
+              
               final user = ref.read(authProviderInstance).currentUser;
               if (user == null) return;
 
-              final playlistId = await ref.read(playlistProviderInstance).joinPlaylist(
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
+
+              final playlistId = await ref.read(playlistProviderInstance.notifier).joinPlaylist(
                 shareCode: _shareCodeController.text.toUpperCase(),
                 userId: user.uid,
                 displayName: user.displayName,
                 profilePicture: user.profilePicture,
               );
 
-              if (mounted) {
-                Navigator.pop(context);
-                if (playlistId != null) {
-                  AppRoutes.navigateToPlaylist(context, playlistId);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Invalid share code')),
-                  );
-                }
+              if (!mounted) return;
+              
+              navigator.pop();
+              if (playlistId != null && mounted) {
+                // ignore: use_build_context_synchronously
+                AppRoutes.navigateToPlaylist(context, playlistId);
+              } else {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Invalid share code')),
+                );
               }
             },
             child: const Text('Join'),
@@ -117,7 +123,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
                 Expanded(
-                  child: StreamBuilder(
+                  child: StreamBuilder<List<PlaylistModel>>(
                     stream: ref.read(firestoreServiceProvider).getUserPlaylists(user.uid),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -131,7 +137,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.queue_music, size: 80, color: AppTheme.textTertiary),
+                              const Icon(Icons.queue_music, size: 80, color: AppTheme.textTertiary),
                               const SizedBox(height: 16),
                               Text(
                                 'No playlists yet',
@@ -170,6 +176,3 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 }
-
-final playlistProviderInstance = ChangeNotifierProvider((ref) => PlaylistProvider());
-final firestoreServiceProvider = Provider((ref) => FirestoreService());

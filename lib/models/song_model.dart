@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../utils/logger.dart';
 
 class SongModel {
   final String id;
@@ -38,26 +39,60 @@ class SongModel {
   });
   
   factory SongModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    
-    return SongModel(
-      id: doc.id,
-      trackId: data['trackId'] ?? '',
-      trackName: data['trackName'] ?? '',
-      artistName: data['artistName'] ?? '',
-      albumName: data['albumName'] ?? '',
-      albumArtUrl: data['albumArtUrl'] ?? '',
-      previewUrl: data['previewUrl'],
-      duration: Duration(milliseconds: data['durationMs'] ?? 0),
-      addedByUserId: data['addedByUserId'] ?? '',
-      addedByDisplayName: data['addedByDisplayName'] ?? '',
-      addedAt: (data['addedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      voteScore: data['voteScore'] ?? 0,
-      upvoters: List<String>.from(data['upvoters'] ?? []),
-      downvoters: List<String>.from(data['downvoters'] ?? []),
-      audioFeatures: data['audioFeatures'],
-      moodTags: List<String>.from(data['moodTags'] ?? []),
-    );
+    try {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) throw Exception('Song document data is null');
+      
+      // Safe conversion of List<Object?> to List<String>
+      List<String> upvoters = [];
+      final upvotersData = data['upvoters'];
+      if (upvotersData != null && upvotersData is List) {
+        upvoters = upvotersData
+            .where((item) => item != null)
+            .map((item) => item.toString())
+            .toList();
+      }
+      
+      List<String> downvoters = [];
+      final downvotersData = data['downvoters'];
+      if (downvotersData != null && downvotersData is List) {
+        downvoters = downvotersData
+            .where((item) => item != null)
+            .map((item) => item.toString())
+            .toList();
+      }
+      
+      List<String> moodTags = [];
+      final moodTagsData = data['moodTags'];
+      if (moodTagsData != null && moodTagsData is List) {
+        moodTags = moodTagsData
+            .where((item) => item != null)
+            .map((item) => item.toString())
+            .toList();
+      }
+      
+      return SongModel(
+        id: doc.id,
+        trackId: data['trackId'] ?? '',
+        trackName: data['trackName'] ?? '',
+        artistName: data['artistName'] ?? '',
+        albumName: data['albumName'] ?? '',
+        albumArtUrl: data['albumArtUrl'] ?? '',
+        previewUrl: data['previewUrl'] as String?,
+        duration: Duration(milliseconds: data['durationMs'] ?? 0),
+        addedByUserId: data['addedByUserId'] ?? '',
+        addedByDisplayName: data['addedByDisplayName'] ?? '',
+        addedAt: (data['addedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        voteScore: data['voteScore'] ?? 0,
+        upvoters: upvoters,
+        downvoters: downvoters,
+        audioFeatures: data['audioFeatures'] as Map<String, dynamic>?,
+        moodTags: moodTags,
+      );
+    } catch (e, st) {
+      Logger.error('Error parsing SongModel from Firestore', e, st);
+      rethrow;
+    }
   }
   
   Map<String, dynamic> toFirestore() {

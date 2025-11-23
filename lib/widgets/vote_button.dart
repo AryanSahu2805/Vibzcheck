@@ -7,11 +7,11 @@ class VoteButton extends StatelessWidget {
   final VoidCallback? onPressed;
 
   const VoteButton({
-    Key? key,
+    super.key,
     required this.isUpvote,
     this.isActive = false,
     this.onPressed,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

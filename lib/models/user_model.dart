@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../utils/logger.dart';
 
 class UserModel {
   final String uid;
@@ -27,20 +28,41 @@ class UserModel {
   
   // Create from Firestore
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    
-    return UserModel(
-      uid: doc.id,
-      email: data['email'] ?? '',
-      displayName: data['displayName'] ?? 'User',
-      profilePicture: data['profilePicture'],
-      spotifyId: data['spotifyId'],
-      fcmToken: data['fcmToken'],
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      lastActive: (data['lastActive'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      playlistIds: List<String>.from(data['playlistIds'] ?? []),
-      spotifyData: data['spotifyData'],
-    );
+    try {
+      final data = doc.data() as Map<String, dynamic>?;
+      
+      if (data == null) {
+        throw Exception('Document data is null');
+      }
+      
+      // Safely convert playlistIds to List<String>
+      List<String> playlistIds = [];
+      final playlistIdsData = data['playlistIds'];
+      if (playlistIdsData != null) {
+        if (playlistIdsData is List) {
+          playlistIds = playlistIdsData
+              .where((item) => item != null)
+              .map((item) => item.toString())
+              .toList();
+        }
+      }
+      
+      return UserModel(
+        uid: doc.id,
+        email: data['email'] ?? '',
+        displayName: data['displayName'] ?? 'User',
+        profilePicture: data['profilePicture'] as String?,
+        spotifyId: data['spotifyId'] as String?,
+        fcmToken: data['fcmToken'] as String?,
+        createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        lastActive: (data['lastActive'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        playlistIds: playlistIds,
+        spotifyData: data['spotifyData'] as Map<String, dynamic>?,
+      );
+    } catch (e, st) {
+      Logger.error('Error parsing UserModel from Firestore', e, st);
+      rethrow;
+    }
   }
   
   // Convert to Firestore

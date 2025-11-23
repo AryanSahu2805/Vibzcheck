@@ -38,11 +38,11 @@ dependencies:
   # Spotify Integration
   spotify: ^0.13.2
   url_launcher: ^6.2.2
-  uni_links: ^0.5.1
+  app_links: ^6.3.2
   
   # Cloudinary (Image Storage)
   cloudinary_public: ^0.21.0
-  cloudinary_sdk: ^4.1.0
+  cloudinary_sdk: ^5.0.0+1
   
   # FCM V1 API (OAuth 2.0 for push notifications)
   googleapis_auth: ^1.4.1
@@ -59,10 +59,11 @@ dependencies:
   intl: ^0.19.0
   uuid: ^4.3.3
   path_provider: ^2.1.2
+  path: ^1.9.0
   
   # QR Code
   qr_flutter: ^4.1.0
-  qr_code_scanner: ^1.0.1
+  mobile_scanner: ^3.5.5
   
   # Share
   share_plus: ^7.2.2
@@ -80,7 +81,7 @@ dependencies:
   connectivity_plus: ^5.0.2
   
   # Notifications
-  flutter_local_notifications: ^16.3.2
+  # flutter_local_notifications: ^16.3.2
   
   # Emoji
   emoji_picker_flutter: ^1.6.4
@@ -101,7 +102,7 @@ flutter:
     - .env
     - firebase-service-account.json
 
-  fonts:
-    - family: CustomIcon
-      fonts:
-        - asset: assets/fonts/CustomIcon.ttf
+  # fonts:
+  #   - family: CustomIcon
+  #     fonts:
+  #       - asset: assets/fonts/CustomIcon.ttf

@@ -10,12 +10,12 @@ class SongItem extends StatelessWidget {
   final VoidCallback? onDownvote;
 
   const SongItem({
-    Key? key,
+    super.key,
     required this.song,
     this.onTap,
     this.onUpvote,
     this.onDownvote,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

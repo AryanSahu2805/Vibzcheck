@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import '../utils/logger.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../config/theme.dart';
 import '../config/routes.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({Key? key}) : super(key: key);
+  const SplashScreen({super.key});
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -42,12 +43,19 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     
     if (!mounted) return;
     
+    try {
     final user = FirebaseAuth.instance.currentUser;
     
     if (user != null) {
       AppRoutes.navigateToHome(context);
     } else {
       Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
+      }
+    } catch (e) {
+      Logger.info('❌ Error checking auth state: $e');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
+      }
     }
   }
 
@@ -61,7 +69,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: AppTheme.darkGradient,
         ),
         child: Center(
@@ -72,7 +80,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.music_note,
                     size: 100,
                     color: AppTheme.primaryColor,

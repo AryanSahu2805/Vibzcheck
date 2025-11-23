@@ -1,15 +1,41 @@
+import 'dart:async';
 import 'dart:convert';
+import '../utils/logger.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:uni_links/uni_links.dart';
+import 'package:app_links/app_links.dart';
 import '../config/constants.dart';
 
 class SpotifyService {
   String? _accessToken;
   DateTime? _tokenExpiry;
+  final _appLinks = AppLinks();
+  
+  // Check if Spotify is configured (REQUIRED)
+  bool get isConfigured {
+    final clientId = AppConstants.spotifyClientId;
+    final clientSecret = AppConstants.spotifyClientSecret;
+    final redirectUri = AppConstants.spotifyRedirectUri;
+    
+    Logger.debug('Spotify Config Check:');
+    Logger.debug('  CLIENT_ID: ${clientId.isNotEmpty ? '✓ Present' : '✗ Missing'}');
+    Logger.debug('  CLIENT_SECRET: ${clientSecret.isNotEmpty ? '✓ Present' : '✗ Missing'}');
+    Logger.debug('  REDIRECT_URI: ${redirectUri.isNotEmpty ? '✓ Present ($redirectUri)' : '✗ Missing'}');
+    
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      throw Exception(
+        'Spotify credentials not configured. '
+        'Please set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in .env file. '
+        'Current values: CLIENT_ID="${clientId.isEmpty ? '[EMPTY]' : '[SET]'}", '
+        'CLIENT_SECRET="${clientSecret.isEmpty ? '[EMPTY]' : '[SET]'}"'
+      );
+    }
+    return true;
+  }
   
   // Authorization URL
   String get authorizationUrl {
+    isConfigured; // Validate credentials
     final scopes = AppConstants.spotifyScopes.join('%20');
     return '${AppConstants.spotifyAuthUrl}'
         '?client_id=${AppConstants.spotifyClientId}'
@@ -18,23 +44,52 @@ class SpotifyService {
         '&scope=$scopes';
   }
   
-  // Authorize with Spotify
+  // Authorize with Spotify (REQUIRED)
   Future<bool> authorize() async {
     try {
+      isConfigured; // Validate credentials
+      Logger.info('Starting Spotify authorization...');
+      
       // Launch Spotify authorization
       final url = Uri.parse(authorizationUrl);
+      Logger.debug('Authorization URL: $authorizationUrl');
+      
       if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+        Logger.info('Launching Spotify authorization URL...');
+        try {
+          final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
+          Logger.debug('launchUrl result: $launched');
+          if (!launched) {
+            Logger.error('launchUrl returned false (browser may not be available)');
+            return false;
+          }
+        } catch (launchError) {
+          Logger.error('launchUrl threw exception: $launchError');
+          return false;
+        }
         
         // Wait for callback
+        Logger.info('Waiting for authorization callback...');
         final code = await _waitForAuthorizationCode();
         if (code != null) {
-          return await _exchangeCodeForToken(code);
+          Logger.info('Authorization code received, exchanging for access token...');
+          final tokenSuccess = await _exchangeCodeForToken(code);
+          if (tokenSuccess) {
+            Logger.success('✅ Spotify authorization completed successfully');
+          } else {
+            Logger.error('Token exchange failed after receiving code');
+          }
+          return tokenSuccess;
+        } else {
+          Logger.warning('No authorization code received');
+          return false;
         }
+      } else {
+        Logger.error('canLaunchUrl returned false for: $authorizationUrl');
+        return false;
       }
-      return false;
-    } catch (e) {
-      print('❌ Spotify auth error: $e');
+    } catch (e, st) {
+      Logger.error('Spotify auth error', e, st);
       return false;
     }
   }
@@ -42,26 +97,53 @@ class SpotifyService {
   // Wait for authorization code from deep link
   Future<String?> _waitForAuthorizationCode() async {
     try {
-      final uri = await getInitialUri();
+      Logger.debug('Checking initial deep link for Spotify callback...');
+      // Get the initial link if app was opened with one
+      final uri = await _appLinks.getInitialLink();
+      Logger.debug('Initial link: $uri');
       if (uri != null && uri.queryParameters.containsKey('code')) {
+        Logger.debug('Authorization code found in initial link');
         return uri.queryParameters['code'];
       }
-      
-      // Listen for incoming links
-      await for (final uri in uriLinkStream) {
+
+      Logger.debug('Listening for uriLinkStream events (timeout 120s)...');
+      final completer = Completer<String?>();
+      late final StreamSubscription sub;
+      Timer? timeout;
+
+      sub = _appLinks.uriLinkStream.listen((uri) {
+        Logger.debug('Received deep link event: $uri');
         if (uri.queryParameters.containsKey('code')) {
-          return uri.queryParameters['code'];
+          if (!completer.isCompleted) {
+            completer.complete(uri.queryParameters['code']);
+          }
         }
-      }
-    } catch (e) {
-      print('❌ Authorization code error: $e');
+      }, onError: (e) {
+        Logger.info('Error while listening for deep links: $e');
+        if (!completer.isCompleted) completer.complete(null);
+      });
+
+      // Timeout after a reasonable period so callers don't wait forever
+      timeout = Timer(const Duration(seconds: 120), () {
+        Logger.warning('Timed out waiting for Spotify authorization callback');
+        if (!completer.isCompleted) completer.complete(null);
+      });
+
+      final result = await completer.future;
+      // Cleanup
+      await sub.cancel();
+      timeout.cancel();
+      return result;
+    } catch (e, st) {
+      Logger.error('❌ Authorization code error', e, st);
+      return null;
     }
-    return null;
   }
   
   // Exchange code for access token
   Future<bool> _exchangeCodeForToken(String code) async {
     try {
+      Logger.debug('Exchanging authorization code for access token...');
       final credentials = base64Encode(
         utf8.encode('${AppConstants.spotifyClientId}:${AppConstants.spotifyClientSecret}'),
       );
@@ -79,19 +161,21 @@ class SpotifyService {
         },
       );
       
+      Logger.debug('Token exchange response status: ${response.statusCode}');
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         _accessToken = data['access_token'];
         _tokenExpiry = DateTime.now().add(
           Duration(seconds: data['expires_in']),
         );
+        Logger.success('✅ Access token obtained, expires in ${data['expires_in']}s');
         return true;
       }
       
-      print('❌ Token exchange failed: ${response.body}');
+      Logger.error('Token exchange failed: ${response.statusCode} ${response.body}');
       return false;
-    } catch (e) {
-      print('❌ Token exchange error: $e');
+    } catch (e, st) {
+      Logger.error('Token exchange error', e, st);
       return false;
     }
   }
@@ -103,11 +187,12 @@ class SpotifyService {
         DateTime.now().isBefore(_tokenExpiry!);
   }
   
-  // Search tracks
+  // Search tracks (REQUIRED feature)
   Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 20}) async {
     try {
+      isConfigured; // Validate credentials
       if (!isAuthorized) {
-        throw Exception('Not authorized');
+        throw Exception('Not authorized with Spotify. Please connect your Spotify account first.');
       }
       
       final response = await http.get(
@@ -123,7 +208,7 @@ class SpotifyService {
       
       return [];
     } catch (e) {
-      print('❌ Search tracks error: $e');
+      Logger.info('❌ Search tracks error: $e');
       return [];
     }
   }
@@ -146,7 +231,7 @@ class SpotifyService {
       
       return null;
     } catch (e) {
-      print('❌ Get track error: $e');
+      Logger.info('❌ Get track error: $e');
       return null;
     }
   }
@@ -169,7 +254,7 @@ class SpotifyService {
       
       return null;
     } catch (e) {
-      print('❌ Get audio features error: $e');
+      Logger.info('❌ Get audio features error: $e');
       return null;
     }
   }
@@ -192,7 +277,7 @@ class SpotifyService {
       
       return null;
     } catch (e) {
-      print('❌ Get user profile error: $e');
+      Logger.info('❌ Get user profile error: $e');
       return null;
     }
   }
@@ -216,7 +301,7 @@ class SpotifyService {
       
       return [];
     } catch (e) {
-      print('❌ Get top tracks error: $e');
+      Logger.info('❌ Get top tracks error: $e');
       return [];
     }
   }

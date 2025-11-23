@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../utils/logger.dart';
 
 class PlaylistModel {
   final String id;
@@ -30,24 +31,47 @@ class PlaylistModel {
   });
   
   factory PlaylistModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    
-    return PlaylistModel(
-      id: doc.id,
-      name: data['name'] ?? '',
-      description: data['description'],
-      coverImage: data['coverImage'],
-      creatorId: data['creatorId'] ?? '',
-      creatorName: data['creatorName'] ?? '',
-      participants: (data['participants'] as List?)
-          ?.map((p) => ParticipantModel.fromMap(p as Map<String, dynamic>))
-          .toList() ?? [],
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      shareCode: data['shareCode'] ?? '',
-      isPublic: data['isPublic'] ?? false,
-      songCount: data['songCount'] ?? 0,
-    );
+    try {
+      final data = doc.data() as Map<String, dynamic>?;
+      
+      if (data == null) {
+        throw Exception('Playlist document data is null');
+      }
+      
+      // Safely parse participants
+      List<ParticipantModel> participants = [];
+      final participantsData = data['participants'];
+      if (participantsData != null && participantsData is List) {
+        participants = participantsData
+            .where((p) => p != null)
+            .map((p) {
+              if (p is Map<String, dynamic>) {
+                return ParticipantModel.fromMap(p);
+              }
+              return null;
+            })
+            .whereType<ParticipantModel>()
+            .toList();
+      }
+      
+      return PlaylistModel(
+        id: doc.id,
+        name: data['name'] ?? '',
+        description: data['description'] as String?,
+        coverImage: data['coverImage'] as String?,
+        creatorId: data['creatorId'] ?? '',
+        creatorName: data['creatorName'] ?? '',
+        participants: participants,
+        createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        shareCode: data['shareCode'] ?? '',
+        isPublic: (data['isPublic'] ?? false) as bool,
+        songCount: (data['songCount'] ?? 0) as int,
+      );
+    } catch (e, st) {
+      Logger.error('Error parsing PlaylistModel from Firestore', e, st);
+      rethrow;
+    }
   }
   
   Map<String, dynamic> toFirestore() {

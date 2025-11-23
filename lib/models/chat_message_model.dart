@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../utils/logger.dart';
 
 class ChatMessageModel {
   final String id;
@@ -24,19 +25,35 @@ class ChatMessageModel {
   });
   
   factory ChatMessageModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    
-    return ChatMessageModel(
-      id: doc.id,
-      playlistId: data['playlistId'] ?? '',
-      userId: data['userId'] ?? '',
-      displayName: data['displayName'] ?? '',
-      profilePicture: data['profilePicture'],
-      message: data['message'] ?? '',
-      timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      mentions: List<String>.from(data['mentions'] ?? []),
-      replyToMessageId: data['replyToMessageId'],
-    );
+    try {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) throw Exception('Chat message document data is null');
+      
+      // Safe conversion of List<Object?> to List<String>
+      List<String> mentions = [];
+      final mentionsData = data['mentions'];
+      if (mentionsData != null && mentionsData is List) {
+        mentions = mentionsData
+            .where((item) => item != null)
+            .map((item) => item.toString())
+            .toList();
+      }
+      
+      return ChatMessageModel(
+        id: doc.id,
+        playlistId: data['playlistId'] ?? '',
+        userId: data['userId'] ?? '',
+        displayName: data['displayName'] ?? '',
+        profilePicture: data['profilePicture'] as String?,
+        message: data['message'] ?? '',
+        timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        mentions: mentions,
+        replyToMessageId: data['replyToMessageId'] as String?,
+      );
+    } catch (e, st) {
+      Logger.error('Error parsing ChatMessageModel from Firestore', e, st);
+      rethrow;
+    }
   }
   
   Map<String, dynamic> toFirestore() {
