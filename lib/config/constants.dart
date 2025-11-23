@@ -6,10 +6,15 @@ class AppConstants {
   static const String appVersion = '1.0.0';
   static const String appTagline = 'Collaborative Music, Democratic Vibes';
   
-  // Spotify Configuration
-  static String get spotifyClientId => dotenv.env['SPOTIFY_CLIENT_ID'] ?? '';
-  static String get spotifyClientSecret => dotenv.env['SPOTIFY_CLIENT_SECRET'] ?? '';
-  static String get spotifyRedirectUri => dotenv.env['SPOTIFY_REDIRECT_URI'] ?? 'vibzcheck://callback';
+  // Spotify Configuration - Load from .env
+  static String get spotifyClientId => 
+      dotenv.env['SPOTIFY_CLIENT_ID'] ?? '316d9cd808124bf7b85df9428fc21a08';
+  
+  static String get spotifyClientSecret => 
+      dotenv.env['SPOTIFY_CLIENT_SECRET'] ?? '6a1ea49e8e4944ea8ffbbbba848fb8d3';
+  
+  static String get spotifyRedirectUri => 
+      dotenv.env['SPOTIFY_REDIRECT_URI'] ?? 'vibzcheck://callback';
   
   static const List<String> spotifyScopes = [
     'user-read-private',
@@ -19,16 +24,33 @@ class AppConstants {
     'playlist-read-collaborative',
   ];
   
-  // Cloudinary Configuration
-  static String get cloudinaryCloudName => dotenv.env['CLOUDINARY_CLOUD_NAME'] ?? '';
-  static String get cloudinaryApiKey => dotenv.env['CLOUDINARY_API_KEY'] ?? '';
-  static String get cloudinaryApiSecret => dotenv.env['CLOUDINARY_API_SECRET'] ?? '';
-  static String get cloudinaryUploadPreset => dotenv.env['CLOUDINARY_UPLOAD_PRESET'] ?? '';
+  static const String spotifyAuthUrl = 'https://accounts.spotify.com/authorize';
+  static const String spotifyApiUrl = 'https://api.spotify.com/v1';
   
-  // Firebase Configuration
-  static String get fcmServiceAccountPath => dotenv.env['FCM_SERVICE_ACCOUNT_PATH'] ?? '';
-  static String get fcmProjectId => dotenv.env['FCM_PROJECT_ID'] ?? '';
-  static String get fcmSenderId => dotenv.env['FCM_SENDER_ID'] ?? '';
+  // Cloudinary Configuration
+  static String get cloudinaryCloudName => 
+      dotenv.env['CLOUDINARY_CLOUD_NAME'] ?? 'djhvg5ete';
+  
+  static String get cloudinaryApiKey => 
+      dotenv.env['CLOUDINARY_API_KEY'] ?? '289947569678628';
+  
+  static String get cloudinaryApiSecret => 
+      dotenv.env['CLOUDINARY_API_SECRET'] ?? 'Mc-nY08_0m6fTJuZQvp6cVT89r0';
+  
+  static String get cloudinaryUploadPreset => 
+      dotenv.env['CLOUDINARY_UPLOAD_PRESET'] ?? 'vibzcheck_preset';
+  
+  // Firebase Cloud Messaging
+  static String get fcmServiceAccountPath => 
+      dotenv.env['FCM_SERVICE_ACCOUNT_PATH'] ?? 'firebase-service-account.json';
+  
+  static String get fcmProjectId => 
+      dotenv.env['FCM_PROJECT_ID'] ?? 'vibzcheck';
+  
+  static String get fcmSenderId => 
+      dotenv.env['FCM_SENDER_ID'] ?? '28712650524';
+  
+  static const String fcmUrl = 'https://fcm.googleapis.com/v1/projects';
   
   // Firestore Collections
   static const String usersCollection = 'users';
@@ -181,11 +203,6 @@ class AppConstants {
   static const double radiusMedium = 12.0;
   static const double radiusLarge = 16.0;
   static const double radiusXLarge = 24.0;
-  
-  // URLs
-  static const String spotifyAuthUrl = 'https://accounts.spotify.com/authorize';
-  static const String spotifyApiUrl = 'https://api.spotify.com/v1';
-  static const String fcmUrl = 'https://fcm.googleapis.com/v1/projects';
   
   // Developer Info
   static const String developerName = 'Vasu Singh';

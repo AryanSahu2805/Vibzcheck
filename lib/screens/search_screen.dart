@@ -22,6 +22,57 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _checkSpotifyAuth();
+  }
+
+  Future<void> _checkSpotifyAuth() async {
+    // Check if already authorized
+    if (!_spotifyService.isAuthorized) {
+      // Show dialog to connect Spotify
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showConnectSpotifyDialog();
+      });
+    }
+  }
+
+  void _showConnectSpotifyDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Connect Spotify'),
+        content: const Text('You need to connect your Spotify account to search for songs.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _connectSpotify();
+            },
+            child: const Text('Connect'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _connectSpotify() async {
+    final authProvider = ref.read(authProviderInstance.notifier);
+    final success = await authProvider.connectSpotify();
+
+    if (!success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to connect Spotify')),
+      );
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();

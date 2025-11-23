@@ -386,6 +386,7 @@ class AuthService {
   // Check if email exists
   Future<bool> emailExists(String email) async {
     try {
+      // ignore: deprecated_member_use
       final methods = await _auth.fetchSignInMethodsForEmail(email);
       return methods.isNotEmpty;
     } catch (e) {

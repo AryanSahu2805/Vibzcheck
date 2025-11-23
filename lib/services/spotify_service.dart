@@ -180,18 +180,42 @@ class SpotifyService {
     }
   }
   
-  // Check if token is valid
+  // IMPROVED: Better authorization check with expiry buffer
   bool get isAuthorized {
-    return _accessToken != null &&
-        _tokenExpiry != null &&
-        DateTime.now().isBefore(_tokenExpiry!);
+    if (_accessToken == null || _tokenExpiry == null) {
+      Logger.debug('Not authorized: token or expiry is null');
+      return false;
+    }
+    
+    // Check if token expired (with 5 minute buffer for safety)
+    final expiryWithBuffer = _tokenExpiry!.subtract(const Duration(minutes: 5));
+    final isValid = DateTime.now().isBefore(expiryWithBuffer);
+    
+    if (!isValid) {
+      Logger.debug('Token expired or expiring soon (expires at $_tokenExpiry)');
+    }
+    
+    return isValid;
+  }
+  
+  // NEW: Method to ensure authorization, re-authorizing if needed
+  Future<bool> ensureAuthorized() async {
+    if (isAuthorized) {
+      Logger.debug('Already authorized');
+      return true;
+    }
+    
+    Logger.info('Token expired or not set, attempting to re-authorize...');
+    return await authorize();
   }
   
   // Search tracks (REQUIRED feature)
   Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 20}) async {
     try {
       isConfigured; // Validate credentials
-      if (!isAuthorized) {
+      
+      // Ensure authorized before searching (auto-refresh if needed)
+      if (!await ensureAuthorized()) {
         throw Exception('Not authorized with Spotify. Please connect your Spotify account first.');
       }
       
@@ -200,24 +224,32 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
+      // Handle unauthorized response
+      if (response.statusCode == 401) {
+        Logger.warning('Spotify returned 401 Unauthorized, clearing token');
+        clearToken();
+        throw Exception('Spotify authorization expired. Please reconnect.');
+      }
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final tracks = data['tracks']['items'] as List;
         return tracks.cast<Map<String, dynamic>>();
       }
       
+      Logger.warning('Search failed with status ${response.statusCode}');
       return [];
-    } catch (e) {
-      Logger.info('❌ Search tracks error: $e');
-      return [];
+    } catch (e, st) {
+      Logger.error('Search tracks error', e, st);
+      rethrow;
     }
   }
   
   // Get track details
   Future<Map<String, dynamic>?> getTrack(String trackId) async {
     try {
-      if (!isAuthorized) {
-        throw Exception('Not authorized');
+      if (!await ensureAuthorized()) {
+        throw Exception('Not authorized with Spotify');
       }
       
       final response = await http.get(
@@ -225,13 +257,18 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
+      if (response.statusCode == 401) {
+        clearToken();
+        throw Exception('Spotify authorization expired');
+      }
+      
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
       
       return null;
-    } catch (e) {
-      Logger.info('❌ Get track error: $e');
+    } catch (e, st) {
+      Logger.error('Get track error', e, st);
       return null;
     }
   }
@@ -239,8 +276,8 @@ class SpotifyService {
   // Get audio features (for mood tagging)
   Future<Map<String, dynamic>?> getAudioFeatures(String trackId) async {
     try {
-      if (!isAuthorized) {
-        throw Exception('Not authorized');
+      if (!await ensureAuthorized()) {
+        throw Exception('Not authorized with Spotify');
       }
       
       final response = await http.get(
@@ -248,13 +285,18 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
+      if (response.statusCode == 401) {
+        clearToken();
+        throw Exception('Spotify authorization expired');
+      }
+      
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
       
       return null;
-    } catch (e) {
-      Logger.info('❌ Get audio features error: $e');
+    } catch (e, st) {
+      Logger.error('Get audio features error', e, st);
       return null;
     }
   }
@@ -262,8 +304,8 @@ class SpotifyService {
   // Get user profile
   Future<Map<String, dynamic>?> getUserProfile() async {
     try {
-      if (!isAuthorized) {
-        throw Exception('Not authorized');
+      if (!await ensureAuthorized()) {
+        throw Exception('Not authorized with Spotify');
       }
       
       final response = await http.get(
@@ -271,13 +313,18 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
+      if (response.statusCode == 401) {
+        clearToken();
+        throw Exception('Spotify authorization expired');
+      }
+      
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
       
       return null;
-    } catch (e) {
-      Logger.info('❌ Get user profile error: $e');
+    } catch (e, st) {
+      Logger.error('Get user profile error', e, st);
       return null;
     }
   }
@@ -285,8 +332,8 @@ class SpotifyService {
   // Get user's top tracks
   Future<List<Map<String, dynamic>>> getTopTracks({int limit = 20}) async {
     try {
-      if (!isAuthorized) {
-        throw Exception('Not authorized');
+      if (!await ensureAuthorized()) {
+        throw Exception('Not authorized with Spotify');
       }
       
       final response = await http.get(
@@ -294,14 +341,19 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
+      if (response.statusCode == 401) {
+        clearToken();
+        throw Exception('Spotify authorization expired');
+      }
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return (data['items'] as List).cast<Map<String, dynamic>>();
       }
       
       return [];
-    } catch (e) {
-      Logger.info('❌ Get top tracks error: $e');
+    } catch (e, st) {
+      Logger.error('Get top tracks error', e, st);
       return [];
     }
   }
