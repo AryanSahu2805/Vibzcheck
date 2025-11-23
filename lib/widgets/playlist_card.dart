@@ -65,34 +65,29 @@ class PlaylistCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppTheme.textSecondary,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          const Icon(Icons.music_note, size: 16, color: AppTheme.textSecondary),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${playlist.songCount} songs',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(width: 12),
-                          const Icon(Icons.people, size: 16, color: AppTheme.textSecondary),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${playlist.participants.length} members',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.music_note, size: 16, color: AppTheme.textSecondary),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${playlist.songCount} songs',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 16),
+                        const Icon(Icons.people, size: 16, color: AppTheme.textSecondary),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${playlist.participants.length} members',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, size: 24),
+              const Icon(Icons.chevron_right),
             ],
           ),
         ),

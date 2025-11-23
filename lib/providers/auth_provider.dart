@@ -107,35 +107,21 @@ class AuthProvider with ChangeNotifier {
   
   Future<bool> connectSpotify() async {
     try {
-      Logger.info('📱 Connecting to Spotify...');
       final success = await _spotifyService.authorize();
-      Logger.debug('authorize() returned: $success');
       if (success) {
-        Logger.info('Getting Spotify profile...');
         final profile = await _spotifyService.getUserProfile();
         if (profile != null) {
-          Logger.info('Linking Spotify account to user...');
           await _authService.linkSpotifyAccount(
             spotifyId: profile['id'],
             spotifyData: profile,
           );
           _currentUser = await _authService.getUserData(_currentUser!.uid);
-          _error = null;
-          Logger.success('✅ Spotify account linked successfully');
           notifyListeners();
-        } else {
-          Logger.error('Could not fetch Spotify profile after authorization');
-          _error = 'Could not fetch Spotify profile';
         }
-      } else {
-        Logger.warning('Spotify authorization failed');
-        _error = 'Spotify authorization failed. Check logs for details.';
       }
-      notifyListeners();
       return success;
-    } catch (e, st) {
-      Logger.error('connectSpotify error', e, st);
-      _error = 'Connection error: $e';
+    } catch (e) {
+      _error = e.toString();
       notifyListeners();
       return false;
     }

@@ -37,20 +37,12 @@ void main() async {
     try {
       await dotenv.load(fileName: ".env");
       Logger.success('Environment variables loaded');
-      // Log partial credentials for debugging (safety: show only first 10 chars)
-      final clientId = dotenv.env['SPOTIFY_CLIENT_ID'];
-      if (clientId != null && clientId.isNotEmpty) {
-        final preview = clientId.substring(0, clientId.length.clamp(0, 10));
-        Logger.info('📱 Spotify Client ID: $preview...');
-      }
       
       // Validate required environment variables
       final requiredVars = [
         'SPOTIFY_CLIENT_ID',
         'SPOTIFY_CLIENT_SECRET',
-        'SPOTIFY_REDIRECT_URI',
         'CLOUDINARY_CLOUD_NAME',
-        'CLOUDINARY_API_KEY',
         'CLOUDINARY_UPLOAD_PRESET',
       ];
       
@@ -64,17 +56,64 @@ void main() async {
       if (missingVars.isNotEmpty) {
         throw Exception(
           'Missing required environment variables: ${missingVars.join(", ")}\n'
-          'Please check your .env file and ensure all variables are set.'
+          'Please check your .env file.'
         );
       }
-      
-      Logger.success('✅ All required environment variables present');
     } catch (e) {
       Logger.error('Environment variables error: $e', e);
-      _showErrorScreen(
-        'Configuration Error',
-        'Failed to load environment variables:\n\n$e\n\n'
-        'Please ensure your .env file exists in the project root with all required variables.',
+      // Show error screen with helpful message
+      runApp(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: Scaffold(
+            backgroundColor: const Color(0xFF121212),
+            body: SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: Color(0xFFE22134),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Configuration Error',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        e.toString(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFFB3B3B3),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Please ensure your .env file exists and contains all required variables.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF535353),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       );
       return;
     }
@@ -87,12 +126,7 @@ void main() async {
       Logger.success('Firebase initialized');
     } catch (e) {
       Logger.error('Firebase initialization error: $e', e);
-      _showErrorScreen(
-        'Firebase Error',
-        'Failed to initialize Firebase:\n\n$e\n\n'
-        'Please check your Firebase configuration and try again.',
-      );
-      return;
+      throw Exception('Firebase initialization failed: $e');
     }
     
     // Setup FCM background handler (REQUIRED)
@@ -128,30 +162,15 @@ void main() async {
       Logger.warning('Could not set system UI overlay style: $e');
     }
     
-    // Run the app inside a guarded zone so uncaught errors (including TypeError
-    // from platform channels) are logged and don't crash the app silently.
-    runZonedGuarded(() {
-      runApp(
-        const ProviderScope(
-          child: VibzcheckApp(),
-        ),
-      );
-    }, (error, stack) {
-      Logger.error('Uncaught zone error', error, stack);
-    });
+    runApp(
+      const ProviderScope(
+        child: VibzcheckApp(),
+      ),
+    );
   } catch (e, stackTrace) {
     Logger.error('Critical initialization error: $e', e, stackTrace);
     
-      _showErrorScreen(
-        'App Initialization Error',
-        'Failed to initialize the app:\n\n$e\n\n'
-        'Please check your configuration and try again.',
-      );
-  }
-}
-
-  // Helper function to show error screen
-  void _showErrorScreen(String title, String message) {
+    // Show error screen
     runApp(
       MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -170,9 +189,9 @@ void main() async {
                       color: Color(0xFFE22134),
                     ),
                     const SizedBox(height: 24),
-                    Text(
-                      title,
-                      style: const TextStyle(
+                    const Text(
+                      'App Initialization Error',
+                      style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -181,12 +200,20 @@ void main() async {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      message,
+                      e.toString(),
                       style: const TextStyle(
                         fontSize: 14,
                         color: Color(0xFFB3B3B3),
                       ),
                       textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        // Try to restart
+                        main();
+                      },
+                      child: const Text('Retry'),
                     ),
                   ],
                 ),
@@ -197,6 +224,7 @@ void main() async {
       ),
     );
   }
+}
 
 class VibzcheckApp extends StatelessWidget {
   const VibzcheckApp({super.key});

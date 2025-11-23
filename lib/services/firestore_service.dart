@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../utils/logger.dart';
 import 'dart:math';
@@ -109,10 +108,10 @@ class FirestoreService {
   
   // Get user's playlists by reading user's playlistIds and fetching those docs.
   // This is more reliable than using arrayContains on a map element (which requires exact map match).
-  Stream<List<PlaylistModel>> getUserPlaylists(String userId) {
+  Stream<List<PlaylistModel>> getUserPlaylists(String userId) async* {
     final userDocRef = _firestore.collection(AppConstants.usersCollection).doc(userId);
 
-    return userDocRef.snapshots().asyncExpand((userSnap) async* {
+    await for (final userSnap in userDocRef.snapshots()) {
       final userData = userSnap.data();
       final rawIds = (userData != null && userData['playlistIds'] is List)
           ? List.from(userData['playlistIds']).where((e) => e != null).map((e) => e.toString()).toList()
@@ -120,7 +119,7 @@ class FirestoreService {
 
       if (rawIds.isEmpty) {
         yield <PlaylistModel>[];
-        return;
+        continue;
       }
 
       // Firestore 'whereIn' supports up to 10 elements per query. Chunk if necessary.
@@ -130,50 +129,21 @@ class FirestoreService {
         chunks.add(rawIds.sublist(i, i + chunkSize > rawIds.length ? rawIds.length : i + chunkSize));
       }
 
-      // Create snapshot streams for all chunks
-      final playlistSnapshots = <Stream<QuerySnapshot<Map<String, dynamic>>>>[
-        for (final chunk in chunks)
-          _firestore
-              .collection(AppConstants.playlistsCollection)
-              .where(FieldPath.documentId, whereIn: chunk)
-              .snapshots(),
-      ];
+      final List<PlaylistModel> results = [];
+      for (final chunk in chunks) {
+        final querySnapshot = await _firestore
+            .collection(AppConstants.playlistsCollection)
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
 
-      // Create a controller to combine all chunk streams
-      final controller = StreamController<List<PlaylistModel>>();
-      final subscriptions = <StreamSubscription>[];
-      final latestSnaps = <int, QuerySnapshot<Map<String, dynamic>>>{};
-
-      // Subscribe to all chunk streams
-      for (var i = 0; i < playlistSnapshots.length; i++) {
-        subscriptions.add(playlistSnapshots[i].listen((snap) {
-          latestSnaps[i] = snap;
-          
-          // Aggregate results from all chunks that have at least one snapshot
-          final allResults = <PlaylistModel>[];
-          for (final snap in latestSnaps.values) {
-            allResults.addAll(snap.docs.map((d) => PlaylistModel.fromFirestore(d)));
-          }
-          
-          // Sort by updatedAt descending
-          allResults.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-          controller.add(allResults);
-        }, onError: (e) {
-          controller.addError(e);
-        }));
+        results.addAll(querySnapshot.docs.map((d) => PlaylistModel.fromFirestore(d)));
       }
 
-      // Listen to the controller and yield its events
-      await for (final result in controller.stream) {
-        yield result;
-      }
+      // Sort by updatedAt descending to keep same behavior
+      results.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
-      // Cleanup
-      for (final sub in subscriptions) {
-        await sub.cancel();
-      }
-      await controller.close();
-    });
+      yield results;
+    }
   }
   
   // Join playlist by share code

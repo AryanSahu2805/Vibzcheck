@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import '../utils/logger.dart';
 import 'package:http/http.dart' as http;
@@ -56,36 +55,20 @@ class SpotifyService {
       
       if (await canLaunchUrl(url)) {
         Logger.info('Launching Spotify authorization URL...');
-        try {
-          final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
-          Logger.debug('launchUrl result: $launched');
-          if (!launched) {
-            Logger.error('launchUrl returned false (browser may not be available)');
-            return false;
-          }
-        } catch (launchError) {
-          Logger.error('launchUrl threw exception: $launchError');
-          return false;
-        }
+        await launchUrl(url, mode: LaunchMode.externalApplication);
         
         // Wait for callback
         Logger.info('Waiting for authorization callback...');
         final code = await _waitForAuthorizationCode();
         if (code != null) {
           Logger.info('Authorization code received, exchanging for access token...');
-          final tokenSuccess = await _exchangeCodeForToken(code);
-          if (tokenSuccess) {
-            Logger.success('✅ Spotify authorization completed successfully');
-          } else {
-            Logger.error('Token exchange failed after receiving code');
-          }
-          return tokenSuccess;
+          return await _exchangeCodeForToken(code);
         } else {
           Logger.warning('No authorization code received');
           return false;
         }
       } else {
-        Logger.error('canLaunchUrl returned false for: $authorizationUrl');
+        Logger.error('Could not launch Spotify authorization URL');
         return false;
       }
     } catch (e, st) {
@@ -97,53 +80,27 @@ class SpotifyService {
   // Wait for authorization code from deep link
   Future<String?> _waitForAuthorizationCode() async {
     try {
-      Logger.debug('Checking initial deep link for Spotify callback...');
       // Get the initial link if app was opened with one
       final uri = await _appLinks.getInitialLink();
-      Logger.debug('Initial link: $uri');
       if (uri != null && uri.queryParameters.containsKey('code')) {
-        Logger.debug('Authorization code found in initial link');
         return uri.queryParameters['code'];
       }
-
-      Logger.debug('Listening for uriLinkStream events (timeout 120s)...');
-      final completer = Completer<String?>();
-      late final StreamSubscription sub;
-      Timer? timeout;
-
-      sub = _appLinks.uriLinkStream.listen((uri) {
-        Logger.debug('Received deep link event: $uri');
+      
+      // Listen for incoming links
+      await for (final uri in _appLinks.uriLinkStream) {
         if (uri.queryParameters.containsKey('code')) {
-          if (!completer.isCompleted) {
-            completer.complete(uri.queryParameters['code']);
-          }
+          return uri.queryParameters['code'];
         }
-      }, onError: (e) {
-        Logger.info('Error while listening for deep links: $e');
-        if (!completer.isCompleted) completer.complete(null);
-      });
-
-      // Timeout after a reasonable period so callers don't wait forever
-      timeout = Timer(const Duration(seconds: 120), () {
-        Logger.warning('Timed out waiting for Spotify authorization callback');
-        if (!completer.isCompleted) completer.complete(null);
-      });
-
-      final result = await completer.future;
-      // Cleanup
-      await sub.cancel();
-      timeout.cancel();
-      return result;
-    } catch (e, st) {
-      Logger.error('❌ Authorization code error', e, st);
-      return null;
+      }
+    } catch (e) {
+      Logger.info('❌ Authorization code error: $e');
     }
+    return null;
   }
   
   // Exchange code for access token
   Future<bool> _exchangeCodeForToken(String code) async {
     try {
-      Logger.debug('Exchanging authorization code for access token...');
       final credentials = base64Encode(
         utf8.encode('${AppConstants.spotifyClientId}:${AppConstants.spotifyClientSecret}'),
       );
@@ -161,61 +118,35 @@ class SpotifyService {
         },
       );
       
-      Logger.debug('Token exchange response status: ${response.statusCode}');
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         _accessToken = data['access_token'];
         _tokenExpiry = DateTime.now().add(
           Duration(seconds: data['expires_in']),
         );
-        Logger.success('✅ Access token obtained, expires in ${data['expires_in']}s');
         return true;
       }
       
-      Logger.error('Token exchange failed: ${response.statusCode} ${response.body}');
+      Logger.info('❌ Token exchange failed: ${response.body}');
       return false;
-    } catch (e, st) {
-      Logger.error('Token exchange error', e, st);
+    } catch (e) {
+      Logger.info('❌ Token exchange error: $e');
       return false;
     }
   }
   
-  // IMPROVED: Better authorization check with expiry buffer
+  // Check if token is valid
   bool get isAuthorized {
-    if (_accessToken == null || _tokenExpiry == null) {
-      Logger.debug('Not authorized: token or expiry is null');
-      return false;
-    }
-    
-    // Check if token expired (with 5 minute buffer for safety)
-    final expiryWithBuffer = _tokenExpiry!.subtract(const Duration(minutes: 5));
-    final isValid = DateTime.now().isBefore(expiryWithBuffer);
-    
-    if (!isValid) {
-      Logger.debug('Token expired or expiring soon (expires at $_tokenExpiry)');
-    }
-    
-    return isValid;
-  }
-  
-  // NEW: Method to ensure authorization, re-authorizing if needed
-  Future<bool> ensureAuthorized() async {
-    if (isAuthorized) {
-      Logger.debug('Already authorized');
-      return true;
-    }
-    
-    Logger.info('Token expired or not set, attempting to re-authorize...');
-    return await authorize();
+    return _accessToken != null &&
+        _tokenExpiry != null &&
+        DateTime.now().isBefore(_tokenExpiry!);
   }
   
   // Search tracks (REQUIRED feature)
   Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 20}) async {
     try {
       isConfigured; // Validate credentials
-      
-      // Ensure authorized before searching (auto-refresh if needed)
-      if (!await ensureAuthorized()) {
+      if (!isAuthorized) {
         throw Exception('Not authorized with Spotify. Please connect your Spotify account first.');
       }
       
@@ -224,32 +155,24 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
-      // Handle unauthorized response
-      if (response.statusCode == 401) {
-        Logger.warning('Spotify returned 401 Unauthorized, clearing token');
-        clearToken();
-        throw Exception('Spotify authorization expired. Please reconnect.');
-      }
-      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final tracks = data['tracks']['items'] as List;
         return tracks.cast<Map<String, dynamic>>();
       }
       
-      Logger.warning('Search failed with status ${response.statusCode}');
       return [];
-    } catch (e, st) {
-      Logger.error('Search tracks error', e, st);
-      rethrow;
+    } catch (e) {
+      Logger.info('❌ Search tracks error: $e');
+      return [];
     }
   }
   
   // Get track details
   Future<Map<String, dynamic>?> getTrack(String trackId) async {
     try {
-      if (!await ensureAuthorized()) {
-        throw Exception('Not authorized with Spotify');
+      if (!isAuthorized) {
+        throw Exception('Not authorized');
       }
       
       final response = await http.get(
@@ -257,18 +180,13 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
-      if (response.statusCode == 401) {
-        clearToken();
-        throw Exception('Spotify authorization expired');
-      }
-      
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
       
       return null;
-    } catch (e, st) {
-      Logger.error('Get track error', e, st);
+    } catch (e) {
+      Logger.info('❌ Get track error: $e');
       return null;
     }
   }
@@ -276,8 +194,8 @@ class SpotifyService {
   // Get audio features (for mood tagging)
   Future<Map<String, dynamic>?> getAudioFeatures(String trackId) async {
     try {
-      if (!await ensureAuthorized()) {
-        throw Exception('Not authorized with Spotify');
+      if (!isAuthorized) {
+        throw Exception('Not authorized');
       }
       
       final response = await http.get(
@@ -285,18 +203,13 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
-      if (response.statusCode == 401) {
-        clearToken();
-        throw Exception('Spotify authorization expired');
-      }
-      
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
       
       return null;
-    } catch (e, st) {
-      Logger.error('Get audio features error', e, st);
+    } catch (e) {
+      Logger.info('❌ Get audio features error: $e');
       return null;
     }
   }
@@ -304,8 +217,8 @@ class SpotifyService {
   // Get user profile
   Future<Map<String, dynamic>?> getUserProfile() async {
     try {
-      if (!await ensureAuthorized()) {
-        throw Exception('Not authorized with Spotify');
+      if (!isAuthorized) {
+        throw Exception('Not authorized');
       }
       
       final response = await http.get(
@@ -313,18 +226,13 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
-      if (response.statusCode == 401) {
-        clearToken();
-        throw Exception('Spotify authorization expired');
-      }
-      
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
       
       return null;
-    } catch (e, st) {
-      Logger.error('Get user profile error', e, st);
+    } catch (e) {
+      Logger.info('❌ Get user profile error: $e');
       return null;
     }
   }
@@ -332,8 +240,8 @@ class SpotifyService {
   // Get user's top tracks
   Future<List<Map<String, dynamic>>> getTopTracks({int limit = 20}) async {
     try {
-      if (!await ensureAuthorized()) {
-        throw Exception('Not authorized with Spotify');
+      if (!isAuthorized) {
+        throw Exception('Not authorized');
       }
       
       final response = await http.get(
@@ -341,19 +249,14 @@ class SpotifyService {
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       
-      if (response.statusCode == 401) {
-        clearToken();
-        throw Exception('Spotify authorization expired');
-      }
-      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return (data['items'] as List).cast<Map<String, dynamic>>();
       }
       
       return [];
-    } catch (e, st) {
-      Logger.error('Get top tracks error', e, st);
+    } catch (e) {
+      Logger.info('❌ Get top tracks error: $e');
       return [];
     }
   }

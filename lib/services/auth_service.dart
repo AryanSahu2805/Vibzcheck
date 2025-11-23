@@ -147,15 +147,6 @@ class AuthService {
       String friendlyMessage = _getFriendlyErrorMessage(e.code);
       Logger.info('Sign in error: $friendlyMessage');
       throw Exception(friendlyMessage);
-    } on TypeError catch (e, st) {
-      // Type errors originating from platform channel/Pigeon deserialization
-      Logger.error('TypeError during sign-in (possible Pigeon/native mismatch)', e, st);
-      // Provide a helpful message so the user/developer can act
-      throw Exception(
-        'Platform type error during sign-in. This often means native/Dart bindings are out of sync.\n'
-        'Please regenerate Pigeon bindings (if used) and perform a full rebuild.\n'
-        'See logs for details.'
-      );
     } catch (e, st) {
       Logger.error('Sign in error', e, st);
       Logger.info('Sign in error: $e');
@@ -251,20 +242,6 @@ class AuthService {
         }
       }
       
-      return null;
-    } on TypeError catch (e, st) {
-      // Likely a platform channel / Pigeon mismatch producing a List where an object
-      // was expected. Log details and return a safe fallback user if possible.
-      Logger.error('TypeError while fetching user data (possible Pigeon/native mismatch)', e, st);
-      if (currentUser != null) {
-        return UserModel(
-          uid: uid,
-          email: currentUser!.email ?? '',
-          displayName: currentUser!.displayName ?? 'User',
-          createdAt: currentUser!.metadata.creationTime ?? DateTime.now(),
-          lastActive: DateTime.now(),
-        );
-      }
       return null;
     } catch (e, st) {
       Logger.error('Get user data error', e, st);
@@ -386,7 +363,6 @@ class AuthService {
   // Check if email exists
   Future<bool> emailExists(String email) async {
     try {
-      // ignore: deprecated_member_use
       final methods = await _auth.fetchSignInMethodsForEmail(email);
       return methods.isNotEmpty;
     } catch (e) {
