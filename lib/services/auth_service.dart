@@ -29,8 +29,13 @@ class AuthService {
         password: password,
       );
       
-      // Update display name
-      await credential.user?.updateDisplayName(displayName);
+      // Update display name (with error handling)
+      try {
+        await credential.user?.updateDisplayName(displayName);
+      } catch (e) {
+        Logger.warning('Could not update display name: $e');
+        // Continue - display name will be set in Firestore document
+      }
       
       // Get FCM token (REQUIRED for notifications)
       String? fcmToken;
@@ -72,76 +77,58 @@ class AuthService {
     required String password,
   }) async {
     try {
-      final UserCredential credential = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      UserCredential? credential;
       
-  Logger.success('Firebase Auth sign in successful for: ${credential.user?.email}');
-      
-      // Update FCM token and last active (REQUIRED for notifications)
+      // Attempt sign in - catch Pigeon casting errors
       try {
-        final fcmToken = await _fcm.getToken();
-          if (fcmToken != null) {
-          await _firestore
-              .collection(AppConstants.usersCollection)
-              .doc(credential.user!.uid)
-              .update({
-            'fcmToken': fcmToken,
-            'lastActive': FieldValue.serverTimestamp(),
-          });
-          Logger.success('FCM token updated');
-        }
+        credential = await _auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
       } catch (e) {
-  Logger.warning('Could not update FCM token: $e');
-        // Continue anyway - notifications won't work but app can function
+        // If it's a Pigeon casting error, check if user is actually authenticated
+        if (e.toString().contains('PigeonUserDetails') || 
+            e.toString().contains('type cast') ||
+            e.toString().contains('subtype')) {
+          Logger.warning('Pigeon casting error detected, checking if user is actually authenticated...');
+          
+          // Wait a moment for auth state to update
+          await Future.delayed(const Duration(milliseconds: 1000));
+          
+          // Check if user is actually signed in despite the error
+          final authUser = _auth.currentUser;
+          if (authUser != null && authUser.email == email) {
+            Logger.info('User is authenticated despite Pigeon error, proceeding with user data...');
+            // User is authenticated, proceed to get their data
+            // We'll skip the credential and go directly to Firestore
+            return await _getUserDataAfterAuth(authUser, email);
+          } else {
+            // If not authenticated, try one more time
+            Logger.info('User not authenticated, retrying sign in...');
+            try {
+              await _auth.signOut();
+              await Future.delayed(const Duration(milliseconds: 500));
+              credential = await _auth.signInWithEmailAndPassword(
+                email: email,
+                password: password,
+              );
+            } catch (retryError) {
+              Logger.error('Retry also failed', retryError);
+              throw Exception('Authentication failed. Please try again or contact support.');
+            }
+          }
+        } else {
+          rethrow;
+        }
       }
       
-      // Get user data
-      final userDoc = await _firestore
-          .collection(AppConstants.usersCollection)
-          .doc(credential.user!.uid)
-          .get();
-      
-      if (!userDoc.exists) {
-  Logger.warning('User document not found in Firestore for UID: ${credential.user!.uid}');
-  Logger.info('Creating user document from Firebase Auth data...');
-        
-        // Create user document if it doesn't exist
-        final userModel = UserModel(
-          uid: credential.user!.uid,
-          email: credential.user!.email ?? email,
-          displayName: credential.user!.displayName ?? 'User',
-          createdAt: credential.user!.metadata.creationTime ?? DateTime.now(),
-          lastActive: DateTime.now(),
-          fcmToken: await _fcm.getToken(),
-        );
-        
-        await _firestore
-            .collection(AppConstants.usersCollection)
-            .doc(credential.user!.uid)
-            .set(userModel.toFirestore());
-        
-  Logger.success('User document created in Firestore');
-        return userModel;
+      if (credential == null || credential.user == null) {
+        throw Exception('Failed to sign in. Please try again.');
       }
       
-      Logger.success('User document found in Firestore');
-      try {
-        return UserModel.fromFirestore(userDoc);
-      } catch (e, st) {
-        Logger.error('Error parsing user from Firestore', e, st);
-        // If parsing fails, create a basic user model from Firebase Auth
-        Logger.info('Creating fallback user model from Firebase Auth data');
-        final fallbackUser = UserModel(
-          uid: credential.user!.uid,
-          email: credential.user!.email ?? email,
-          displayName: credential.user!.displayName ?? 'User',
-          createdAt: credential.user!.metadata.creationTime ?? DateTime.now(),
-          lastActive: DateTime.now(),
-        );
-        return fallbackUser;
-      }
+      Logger.success('Firebase Auth sign in successful for: ${credential.user?.email}');
+      
+      return await _getUserDataAfterAuth(credential.user!, email);
     } on FirebaseAuthException catch (e) {
       Logger.error('Firebase Auth Exception: ${e.code} - ${e.message}');
       String friendlyMessage = _getFriendlyErrorMessage(e.code);
@@ -151,6 +138,113 @@ class AuthService {
       Logger.error('Sign in error', e, st);
       Logger.info('Sign in error: $e');
       rethrow;
+    }
+  }
+  
+  // Helper method to get user data after authentication
+  Future<UserModel?> _getUserDataAfterAuth(User user, String email) async {
+    // Update FCM token and last active (REQUIRED for notifications)
+    try {
+      final fcmToken = await _fcm.getToken();
+      if (fcmToken != null) {
+        await _firestore
+            .collection(AppConstants.usersCollection)
+            .doc(user.uid)
+            .update({
+          'fcmToken': fcmToken,
+          'lastActive': FieldValue.serverTimestamp(),
+        });
+        Logger.success('FCM token updated');
+      }
+    } catch (e) {
+      Logger.warning('Could not update FCM token: $e');
+      // Continue anyway - notifications won't work but app can function
+    }
+    
+    // Get user data
+    final userDoc = await _firestore
+        .collection(AppConstants.usersCollection)
+        .doc(user.uid)
+        .get();
+    
+    if (!userDoc.exists) {
+      Logger.warning('User document not found in Firestore for UID: ${user.uid}');
+      Logger.info('Creating user document from Firebase Auth data...');
+      
+      // Create user document if it doesn't exist
+      final userModel = UserModel(
+        uid: user.uid,
+        email: user.email ?? email,
+        displayName: user.displayName ?? 'User',
+        createdAt: user.metadata.creationTime ?? DateTime.now(),
+        lastActive: DateTime.now(),
+        fcmToken: await _fcm.getToken(),
+      );
+      
+      await _firestore
+          .collection(AppConstants.usersCollection)
+          .doc(user.uid)
+          .set(userModel.toFirestore());
+      
+      Logger.success('User document created in Firestore');
+      return userModel;
+    }
+    
+    Logger.success('User document found in Firestore');
+    try {
+      final userModel = UserModel.fromFirestore(userDoc);
+      Logger.success('User model parsed successfully');
+      return userModel;
+    } catch (e, st) {
+      Logger.error('Error parsing user from Firestore', e, st);
+      Logger.error('Document data: ${userDoc.data()}', null, null);
+      Logger.error('Document ID: ${userDoc.id}', null, null);
+      
+      // If parsing fails, create a basic user model from Firebase Auth
+      Logger.info('Creating fallback user model from Firebase Auth data');
+      try {
+        final fallbackUser = UserModel(
+          uid: user.uid,
+          email: user.email ?? email,
+          displayName: user.displayName ?? 'User',
+          createdAt: user.metadata.creationTime ?? DateTime.now(),
+          lastActive: DateTime.now(),
+        );
+        
+        // Try to update the Firestore document with correct structure
+        try {
+          await _firestore
+              .collection(AppConstants.usersCollection)
+              .doc(user.uid)
+              .set(fallbackUser.toFirestore(), SetOptions(merge: true));
+          Logger.info('Updated Firestore document with correct structure');
+        } catch (updateError) {
+          Logger.warning('Could not update Firestore document: $updateError');
+        }
+        
+        return fallbackUser;
+      } catch (fallbackError) {
+        Logger.error('Error creating fallback user', fallbackError, null);
+        rethrow;
+      }
+    }
+  }
+  
+  // Convert Firebase password error codes to user-friendly messages
+  String _getFriendlyPasswordErrorMessage(String code) {
+    switch (code) {
+      case 'wrong-password':
+        return 'Current password is incorrect.';
+      case 'weak-password':
+        return 'New password is too weak. Use at least 6 characters.';
+      case 'user-not-found':
+        return 'User not found. Please log in again.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please try again later.';
+      default:
+        return 'Failed to update password: $code. Please try again.';
     }
   }
   
@@ -392,8 +486,7 @@ class AuthService {
       
       // Update password
       await currentUser!.updatePassword(newPassword);
-  Logger.success('Password updated successfully');
-      
+      Logger.success('Password updated successfully');
       Logger.info('✅ Password updated');
     } on FirebaseAuthException catch (e) {
       Logger.error('Password update FirebaseAuthException: ${e.code} - ${e.message}');
@@ -403,24 +496,6 @@ class AuthService {
       Logger.error('Password update error', e);
       Logger.info('Password update error: $e');
       rethrow;
-    }
-  }
-  
-  // Convert Firebase password error codes to user-friendly messages
-  String _getFriendlyPasswordErrorMessage(String code) {
-    switch (code) {
-      case 'wrong-password':
-        return 'Current password is incorrect.';
-      case 'weak-password':
-        return 'New password is too weak. Use at least 6 characters.';
-      case 'user-not-found':
-        return 'User not found. Please log in again.';
-      case 'user-disabled':
-        return 'This account has been disabled.';
-      case 'too-many-requests':
-        return 'Too many attempts. Please try again later.';
-      default:
-        return 'Failed to update password: $code. Please try again.';
     }
   }
 }

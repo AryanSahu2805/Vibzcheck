@@ -70,20 +70,34 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Future<void> _connectSpotifyAndRetry() async {
     final authProvider = ref.read(authProviderInstance.notifier);
     try {
+      setState(() {
+        _isSearching = true;
+        _error = null;
+      });
+      
       final success = await authProvider.connectSpotify();
-      if (success && mounted) {
-        setState(() {
-          _error = null;
-        });
-        // Retry search with previous query
-        if (_searchController.text.isNotEmpty) {
-          _searchSongs(_searchController.text);
+      if (mounted) {
+        if (success) {
+          setState(() {
+            _error = null;
+            _isSearching = false;
+          });
+          // Retry search with previous query
+          if (_searchController.text.isNotEmpty) {
+            _searchSongs(_searchController.text);
+          }
+        } else {
+          setState(() {
+            _error = 'Failed to connect Spotify. Please try again.';
+            _isSearching = false;
+          });
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to connect Spotify: $e';
+          _error = 'Failed to connect Spotify: ${e.toString()}';
+          _isSearching = false;
         });
       }
     }

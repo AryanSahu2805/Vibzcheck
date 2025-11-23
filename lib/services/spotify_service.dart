@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import '../utils/logger.dart';
 import 'package:http/http.dart' as http;
@@ -49,26 +50,53 @@ class SpotifyService {
       isConfigured; // Validate credentials
       Logger.info('Starting Spotify authorization...');
       
+      // Clear any existing token
+      clearToken();
+      
       // Launch Spotify authorization
       final url = Uri.parse(authorizationUrl);
       Logger.debug('Authorization URL: $authorizationUrl');
+      Logger.debug('Client ID: ${AppConstants.spotifyClientId}');
+      Logger.debug('Redirect URI: ${AppConstants.spotifyRedirectUri}');
       
-      if (await canLaunchUrl(url)) {
-        Logger.info('Launching Spotify authorization URL...');
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+      // Try to launch URL - don't rely on canLaunchUrl check
+      Logger.info('Launching Spotify authorization URL...');
+      try {
+        final launched = await launchUrl(
+          url,
+          mode: LaunchMode.externalApplication,
+        );
         
-        // Wait for callback
-        Logger.info('Waiting for authorization callback...');
-        final code = await _waitForAuthorizationCode();
-        if (code != null) {
-          Logger.info('Authorization code received, exchanging for access token...');
-          return await _exchangeCodeForToken(code);
-        } else {
-          Logger.warning('No authorization code received');
+        if (!launched) {
+          Logger.error('Failed to launch authorization URL');
           return false;
         }
+      } catch (e) {
+        Logger.error('Error launching URL: $e', e);
+        // Try alternative method
+        try {
+          await launchUrl(
+            url,
+            mode: LaunchMode.platformDefault,
+          );
+        } catch (e2) {
+          Logger.error('Failed to launch URL with both methods', e2);
+          return false;
+        }
+      }
+      
+      // Wait for callback
+      Logger.info('Waiting for authorization callback...');
+      final code = await _waitForAuthorizationCode();
+      if (code != null && code.isNotEmpty) {
+        Logger.info('Authorization code received, exchanging for access token...');
+        final success = await _exchangeCodeForToken(code);
+        if (success) {
+          Logger.success('Spotify authorization completed successfully!');
+        }
+        return success;
       } else {
-        Logger.error('Could not launch Spotify authorization URL');
+        Logger.warning('No authorization code received or code is empty');
         return false;
       }
     } catch (e, st) {
@@ -80,22 +108,65 @@ class SpotifyService {
   // Wait for authorization code from deep link
   Future<String?> _waitForAuthorizationCode() async {
     try {
-      // Get the initial link if app was opened with one
-      final uri = await _appLinks.getInitialLink();
-      if (uri != null && uri.queryParameters.containsKey('code')) {
-        return uri.queryParameters['code'];
-      }
+      Logger.debug('Waiting for authorization callback...');
       
-      // Listen for incoming links
-      await for (final uri in _appLinks.uriLinkStream) {
-        if (uri.queryParameters.containsKey('code')) {
-          return uri.queryParameters['code'];
+      // Get the initial link if app was opened with one
+      final initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        Logger.debug('Initial link received: $initialUri');
+        if (initialUri.queryParameters.containsKey('code')) {
+          Logger.success('Authorization code found in initial link');
+          return initialUri.queryParameters['code'];
+        }
+        if (initialUri.queryParameters.containsKey('error')) {
+          Logger.error('Authorization error: ${initialUri.queryParameters['error']}');
+          return null;
         }
       }
-    } catch (e) {
-      Logger.info('❌ Authorization code error: $e');
+      
+      // Listen for incoming links with timeout
+      Logger.debug('Listening for deep link callback...');
+      final completer = Completer<String?>();
+      StreamSubscription? subscription;
+      Timer? timeoutTimer;
+      
+      subscription = _appLinks.uriLinkStream.listen(
+        (uri) {
+          Logger.debug('Deep link received: $uri');
+          if (uri.queryParameters.containsKey('code')) {
+            Logger.success('Authorization code received: ${uri.queryParameters['code']?.substring(0, 10)}...');
+            subscription?.cancel();
+            timeoutTimer?.cancel();
+            completer.complete(uri.queryParameters['code']);
+          } else if (uri.queryParameters.containsKey('error')) {
+            Logger.error('Authorization error: ${uri.queryParameters['error']}');
+            subscription?.cancel();
+            timeoutTimer?.cancel();
+            completer.complete(null);
+          }
+        },
+        onError: (error) {
+          Logger.error('Deep link stream error', error);
+          subscription?.cancel();
+          timeoutTimer?.cancel();
+          completer.complete(null);
+        },
+      );
+      
+      // Set timeout (2 minutes)
+      timeoutTimer = Timer(const Duration(minutes: 2), () {
+        Logger.warning('Authorization timeout - no callback received');
+        subscription?.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+      });
+      
+      return await completer.future;
+    } catch (e, st) {
+      Logger.error('Authorization code error', e, st);
+      return null;
     }
-    return null;
   }
   
   // Exchange code for access token
@@ -105,32 +176,43 @@ class SpotifyService {
         utf8.encode('${AppConstants.spotifyClientId}:${AppConstants.spotifyClientSecret}'),
       );
       
+      final redirectUri = AppConstants.spotifyRedirectUri;
+      Logger.debug('Exchanging code for token...');
+      Logger.debug('Redirect URI: $redirectUri');
+      
+      // Encode body properly
+      final body = Uri(
+        queryParameters: {
+          'grant_type': 'authorization_code',
+          'code': code,
+          'redirect_uri': redirectUri,
+        },
+      ).query;
+      
       final response = await http.post(
         Uri.parse('https://accounts.spotify.com/api/token'),
         headers: {
           'Authorization': 'Basic $credentials',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: {
-          'grant_type': 'authorization_code',
-          'code': code,
-          'redirect_uri': AppConstants.spotifyRedirectUri,
-        },
+        body: body,
       );
       
+      Logger.debug('Token exchange response status: ${response.statusCode}');
+      
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        _accessToken = data['access_token'];
-        _tokenExpiry = DateTime.now().add(
-          Duration(seconds: data['expires_in']),
-        );
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        _accessToken = data['access_token'] as String?;
+        final expiresIn = data['expires_in'] as int? ?? 3600;
+        _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
+        Logger.success('Spotify authorization successful!');
         return true;
       }
       
-      Logger.info('❌ Token exchange failed: ${response.body}');
+      Logger.error('Token exchange failed: ${response.statusCode} - ${response.body}');
       return false;
-    } catch (e) {
-      Logger.info('❌ Token exchange error: $e');
+    } catch (e, st) {
+      Logger.error('Token exchange error', e, st);
       return false;
     }
   }

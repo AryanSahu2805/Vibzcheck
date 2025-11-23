@@ -29,10 +29,21 @@ class UserModel {
   // Create from Firestore
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
     try {
-      final data = doc.data() as Map<String, dynamic>?;
+      // Safely get data - handle both Map and other types
+      final rawData = doc.data();
+      Map<String, dynamic>? data;
       
-      if (data == null) {
+      if (rawData == null) {
         throw Exception('Document data is null');
+      }
+      
+      // Safely cast to Map
+      if (rawData is Map) {
+        data = Map<String, dynamic>.from(rawData);
+      } else {
+        Logger.error('Unexpected data type in Firestore document', 
+            Exception('Expected Map but got ${rawData.runtimeType}'), null);
+        throw Exception('Invalid document data type: ${rawData.runtimeType}');
       }
       
       // Safely convert playlistIds to List<String>
@@ -44,23 +55,61 @@ class UserModel {
               .where((item) => item != null)
               .map((item) => item.toString())
               .toList();
+        } else {
+          Logger.warning('playlistIds is not a List, got ${playlistIdsData.runtimeType}');
         }
       }
       
+      // Safely get spotifyData
+      Map<String, dynamic>? spotifyData;
+      final spotifyDataRaw = data['spotifyData'];
+      if (spotifyDataRaw != null) {
+        if (spotifyDataRaw is Map) {
+          spotifyData = Map<String, dynamic>.from(spotifyDataRaw);
+        } else {
+          Logger.warning('spotifyData is not a Map, got ${spotifyDataRaw.runtimeType}');
+        }
+      }
+      
+      // Safely get string fields
+      String? getStringField(Map<String, dynamic> dataMap, String key) {
+        final value = dataMap[key];
+        if (value == null) return null;
+        if (value is String) return value;
+        return value.toString();
+      }
+      
+      // Safely get Timestamp fields
+      DateTime? getDateTimeField(Map<String, dynamic> dataMap, String key) {
+        final value = dataMap[key];
+        if (value == null) return null;
+        if (value is Timestamp) return value.toDate();
+        if (value is DateTime) return value;
+        return null;
+      }
+      
+      // Use data directly (we already checked it's not null above)
+      final dataMap = data;
+      
       return UserModel(
         uid: doc.id,
-        email: data['email'] ?? '',
-        displayName: data['displayName'] ?? 'User',
-        profilePicture: data['profilePicture'] as String?,
-        spotifyId: data['spotifyId'] as String?,
-        fcmToken: data['fcmToken'] as String?,
-        createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-        lastActive: (data['lastActive'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        email: getStringField(dataMap, 'email') ?? '',
+        displayName: getStringField(dataMap, 'displayName') ?? 'User',
+        profilePicture: getStringField(dataMap, 'profilePicture'),
+        spotifyId: getStringField(dataMap, 'spotifyId'),
+        fcmToken: getStringField(dataMap, 'fcmToken'),
+        createdAt: getDateTimeField(dataMap, 'createdAt') ?? DateTime.now(),
+        lastActive: getDateTimeField(dataMap, 'lastActive') ?? DateTime.now(),
         playlistIds: playlistIds,
-        spotifyData: data['spotifyData'] as Map<String, dynamic>?,
+        spotifyData: spotifyData,
       );
     } catch (e, st) {
       Logger.error('Error parsing UserModel from Firestore', e, st);
+      Logger.error('Document ID: ${doc.id}', null, null);
+      Logger.error('Document exists: ${doc.exists}', null, null);
+      if (doc.exists) {
+        Logger.error('Raw data type: ${doc.data().runtimeType}', null, null);
+      }
       rethrow;
     }
   }
