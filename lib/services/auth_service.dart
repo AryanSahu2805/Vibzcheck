@@ -122,7 +122,7 @@ class AuthService {
         }
       }
       
-      if (credential == null || credential.user == null) {
+      if (credential.user == null) {
         throw Exception('Failed to sign in. Please try again.');
       }
       
@@ -172,10 +172,18 @@ class AuthService {
       Logger.info('Creating user document from Firebase Auth data...');
       
       // Create user document if it doesn't exist
+      // Try to get displayName from Firebase Auth first, then email prefix as fallback
+      String displayName = user.displayName ?? '';
+      if (displayName.isEmpty || displayName == 'User') {
+        // Use email prefix as displayName if Firebase Auth displayName is missing
+        final emailPrefix = (user.email ?? email).split('@').first;
+        displayName = emailPrefix.isNotEmpty ? emailPrefix : 'User';
+      }
+      
       final userModel = UserModel(
         uid: user.uid,
         email: user.email ?? email,
-        displayName: user.displayName ?? 'User',
+        displayName: displayName,
         createdAt: user.metadata.creationTime ?? DateTime.now(),
         lastActive: DateTime.now(),
         fcmToken: await _fcm.getToken(),
@@ -203,10 +211,17 @@ class AuthService {
       // If parsing fails, create a basic user model from Firebase Auth
       Logger.info('Creating fallback user model from Firebase Auth data');
       try {
+        // Try to get displayName from Firebase Auth first, then email prefix as fallback
+        String displayName = user.displayName ?? '';
+        if (displayName.isEmpty || displayName == 'User') {
+          final emailPrefix = (user.email ?? email).split('@').first;
+          displayName = emailPrefix.isNotEmpty ? emailPrefix : 'User';
+        }
+        
         final fallbackUser = UserModel(
           uid: user.uid,
           email: user.email ?? email,
-          displayName: user.displayName ?? 'User',
+          displayName: displayName,
           createdAt: user.metadata.creationTime ?? DateTime.now(),
           lastActive: DateTime.now(),
         );
@@ -341,10 +356,15 @@ class AuthService {
       Logger.error('Get user data error', e, st);
       // Return a basic user model if we have current user
       if (currentUser != null) {
+        String displayName = currentUser!.displayName ?? '';
+        if (displayName.isEmpty || displayName == 'User') {
+          final emailPrefix = (currentUser!.email ?? '').split('@').first;
+          displayName = emailPrefix.isNotEmpty ? emailPrefix : 'User';
+        }
         return UserModel(
           uid: uid,
           email: currentUser!.email ?? '',
-          displayName: currentUser!.displayName ?? 'User',
+          displayName: displayName,
           createdAt: currentUser!.metadata.creationTime ?? DateTime.now(),
           lastActive: DateTime.now(),
         );

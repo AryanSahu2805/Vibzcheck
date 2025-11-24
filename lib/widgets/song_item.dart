@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/song_model.dart';
 import '../config/theme.dart';
+import '../utils/helpers.dart';
 
 class SongItem extends StatelessWidget {
   final SongModel song;
   final VoidCallback? onTap;
   final VoidCallback? onUpvote;
   final VoidCallback? onDownvote;
+  final VoidCallback? onDelete;
 
   const SongItem({
     super.key,
@@ -15,6 +17,7 @@ class SongItem extends StatelessWidget {
     this.onTap,
     this.onUpvote,
     this.onDownvote,
+    this.onDelete,
   });
 
   @override
@@ -57,30 +60,73 @@ class SongItem extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Added by ${song.addedByDisplayName}',
+                      'Added by ${Helpers.getBetterDisplayName(song.addedByDisplayName, null)}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppTheme.textTertiary,
                       ),
                     ),
+                    if (song.moodTags.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: song.moodTags.map((tag) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryColor.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: AppTheme.primaryColor.withValues(alpha: 0.5),
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              tag,
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: AppTheme.primaryColor,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              Column(
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_upward, size: 20),
-                    onPressed: onUpvote,
-                    color: AppTheme.primaryColor,
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_upward, size: 20),
+                        onPressed: onUpvote,
+                        color: AppTheme.primaryColor,
+                      ),
+                      Text(
+                        '${song.voteScore}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.arrow_downward, size: 20),
+                        onPressed: onDownvote,
+                        color: AppTheme.errorColor,
+                      ),
+                    ],
                   ),
-                  Text(
-                    '${song.voteScore}',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.arrow_downward, size: 20),
-                    onPressed: onDownvote,
-                    color: AppTheme.errorColor,
-                  ),
+                  if (onDelete != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      onPressed: onDelete,
+                      color: AppTheme.errorColor,
+                      tooltip: 'Delete song',
+                    ),
+                  ],
                 ],
               ),
             ],

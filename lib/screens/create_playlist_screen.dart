@@ -4,6 +4,7 @@ import '../config/theme.dart';
 import '../config/routes.dart';
 import '../providers/providers.dart';
 import '../services/cloudinary_service.dart';
+import '../utils/helpers.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
 import '../utils/validators.dart';
@@ -72,7 +73,7 @@ class _CreatePlaylistScreenState extends ConsumerState<CreatePlaylistScreen> {
             : _descriptionController.text.trim(),
         coverImage: _coverImageUrl,
         creatorId: user.uid,
-        creatorName: user.displayName,
+        creatorName: Helpers.getBetterDisplayName(user.displayName, user.email),
         creatorProfilePicture: user.profilePicture,
         isPublic: _isPublic,
       );

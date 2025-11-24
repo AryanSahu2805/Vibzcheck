@@ -24,10 +24,50 @@ class AppRoutes {
   static const String search = '/search';
   static const String profile = '/profile';
   static const String analytics = '/analytics';
+  static const String spotifyCallback = '/callback';
   
   // Route generator
   static Route<dynamic> generateRoute(RouteSettings routeSettings) {
-    switch (routeSettings.name) {
+    // Handle Spotify OAuth callback - extract route name without query params
+    String routeName = routeSettings.name ?? '/';
+    
+    // Parse URI to check for query parameters
+    Uri? uri;
+    if (routeSettings.name != null) {
+      // Try parsing as full URI first (for deep links like vibzcheck://callback?code=...)
+      uri = Uri.tryParse(routeSettings.name!);
+      if (uri == null || uri.scheme.isEmpty) {
+        // If not a full URI, try as path with query
+        uri = Uri.tryParse('/${routeSettings.name}');
+      }
+      
+      // Extract route name without query params
+      if (routeName.contains('?')) {
+        routeName = routeName.split('?').first;
+      }
+      // Also check if it's a deep link path
+      if (uri != null && uri.path.isNotEmpty) {
+        routeName = uri.path;
+        if (routeName.isEmpty || routeName == '/') {
+          routeName = '/';
+        }
+      }
+    }
+    
+    // Check if this is a Spotify callback (has code parameter)
+    if (uri != null && uri.queryParameters.containsKey('code')) {
+      // Check if it's the callback path or root with code
+      final path = uri.path.isEmpty ? '/' : uri.path;
+      if (path == '/' || path == '/callback' || uri.host == 'callback') {
+        // This is a Spotify OAuth callback - handle it silently
+        // The SpotifyService listener will pick it up
+        return MaterialPageRoute(
+          builder: (_) => const _SpotifyCallbackHandler(),
+        );
+      }
+    }
+    
+    switch (routeName) {
       case splash:
         return MaterialPageRoute(
           builder: (_) => const SplashScreen(),
@@ -97,6 +137,12 @@ class AppRoutes {
       case settings:
         return MaterialPageRoute(
           builder: (_) => const SettingsScreen(),
+        );
+        
+      case spotifyCallback:
+        // Handle Spotify callback route
+        return MaterialPageRoute(
+          builder: (_) => const _SpotifyCallbackHandler(),
         );
         
       default:
@@ -176,5 +222,46 @@ class AppRoutes {
   
   static void navigateToSettings(BuildContext context) {
     Navigator.pushNamed(context, settings);
+  }
+}
+
+// Widget to handle Spotify OAuth callback
+// This widget doesn't render anything visible - it just allows the deep link
+// to be processed by the SpotifyService listener
+class _SpotifyCallbackHandler extends StatefulWidget {
+  const _SpotifyCallbackHandler();
+
+  @override
+  State<_SpotifyCallbackHandler> createState() => _SpotifyCallbackHandlerState();
+}
+
+class _SpotifyCallbackHandlerState extends State<_SpotifyCallbackHandler> {
+  @override
+  void initState() {
+    super.initState();
+    // Navigate back to the previous screen or home after a brief delay
+    // The SpotifyService listener will handle the actual callback
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => 
+          route.settings.name == AppRoutes.home || 
+          route.settings.name == AppRoutes.search ||
+          route.isFirst
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Show a loading indicator while processing
+    return const Scaffold(
+      backgroundColor: Color(0xFF121212),
+      body: Center(
+        child: CircularProgressIndicator(
+          color: Color(0xFF1DB954),
+        ),
+      ),
+    );
   }
 }

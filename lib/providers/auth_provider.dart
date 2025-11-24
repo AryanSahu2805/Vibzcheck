@@ -4,10 +4,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import '../services/spotify_service.dart';
+import 'providers.dart';
 
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
-  final SpotifyService _spotifyService = SpotifyService();
+  // Use singleton instance from providers.dart
+  late final SpotifyService _spotifyService;
   
   UserModel? _currentUser;
   bool _isLoading = false;
@@ -19,8 +21,12 @@ class AuthProvider with ChangeNotifier {
   bool get isAuthenticated => _currentUser != null;
   
   AuthProvider() {
+    // Use singleton instance from providers
+    _spotifyService = spotifyServiceInstance;
     _init();
   }
+  
+  SpotifyService get spotifyService => _spotifyService;
   
   Future<void> _init() async {
     try {
@@ -125,7 +131,7 @@ class AuthProvider with ChangeNotifier {
   
   Future<void> signOut() async {
     await _authService.signOut();
-    _spotifyService.clearToken();
+    await _spotifyService.clearToken();
     _currentUser = null;
     notifyListeners();
   }
@@ -137,30 +143,47 @@ class AuthProvider with ChangeNotifier {
       notifyListeners();
       
       Logger.info('Connecting to Spotify...');
+      
+      // Check if already authorized first
+      if (_spotifyService.isAuthorized) {
+        Logger.info('✅ Already authorized with Spotify');
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      }
+      
       final success = await _spotifyService.authorize();
       
       if (success) {
         Logger.info('Spotify authorization successful, fetching user profile...');
-        final profile = await _spotifyService.getUserProfile();
-        if (profile != null) {
-          Logger.info('Linking Spotify account to user...');
-          await _authService.linkSpotifyAccount(
-            spotifyId: profile['id'],
-            spotifyData: profile,
-          );
-          if (_currentUser != null) {
-            _currentUser = await _authService.getUserData(_currentUser!.uid);
+        try {
+          final profile = await _spotifyService.getUserProfile();
+          if (profile != null) {
+            Logger.info('Linking Spotify account to user...');
+            await _authService.linkSpotifyAccount(
+              spotifyId: profile['id'],
+              spotifyData: profile,
+            );
+            if (_currentUser != null) {
+              _currentUser = await _authService.getUserData(_currentUser!.uid);
+            }
+            _isLoading = false;
+            notifyListeners();
+            Logger.success('Spotify account linked successfully!');
+            return true;
+          } else {
+            Logger.warning('Failed to fetch Spotify user profile, but token is valid');
+            // Token is valid even if profile fetch fails
+            _isLoading = false;
+            notifyListeners();
+            return true; // Return true since authorization succeeded
           }
+        } catch (profileError) {
+          Logger.warning('Error fetching profile but token is valid: $profileError');
+          // Token is valid even if profile fetch fails
           _isLoading = false;
           notifyListeners();
-          Logger.success('Spotify account linked successfully!');
-          return true;
-        } else {
-          Logger.warning('Failed to fetch Spotify user profile');
-          _error = 'Failed to fetch Spotify profile';
-          _isLoading = false;
-          notifyListeners();
-          return false;
+          return true; // Return true since authorization succeeded
         }
       } else {
         Logger.warning('Spotify authorization failed');

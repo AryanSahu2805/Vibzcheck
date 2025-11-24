@@ -8,6 +8,7 @@ import '../models/playlist_model.dart';
 import '../models/song_model.dart';
 import '../providers/providers.dart';
 import '../services/audio_service.dart';
+import '../utils/helpers.dart';
 import '../widgets/song_item.dart';
 
 class PlaylistViewScreen extends ConsumerStatefulWidget {
@@ -50,7 +51,7 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
       }
       
       await _audioService.playPreview(
-        songId: song.id,
+        songId: song.trackId, // Use Spotify track ID for consistent caching
         previewUrl: song.previewUrl!,
       );
     } catch (e) {
@@ -79,6 +80,132 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
     Share.share(
       'Join my playlist "${playlist.name}" on Vibzcheck!\n\n📱 Share Code: ${playlist.shareCode}\n\nSearch this code in the app to join the playlist and collaborate on music together!',
     );
+  }
+
+  Future<void> _deleteSong(SongModel song) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Song'),
+        content: Text('Are you sure you want to remove "${song.trackName}" from this playlist?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.errorColor,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        await ref.read(playlistProviderInstance.notifier).deleteSong(
+              playlistId: widget.playlistId,
+              songId: song.id,
+            );
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Removed "${song.trackName}" from playlist'),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete song: $e'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _deletePlaylist(BuildContext context) async {
+    final playlist = ref.read(playlistProviderInstance).currentPlaylist;
+    final currentUser = ref.read(authProviderInstance).currentUser;
+    final messenger = ScaffoldMessenger.of(context);
+    
+    if (playlist == null || currentUser == null) return;
+    
+    // Verify user is creator
+    if (playlist.creatorId != currentUser.uid) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Only the playlist creator can delete this playlist'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Playlist'),
+        content: Text(
+          'Are you sure you want to delete "${playlist.name}"? This action cannot be undone. All songs and chat messages will be permanently deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.errorColor,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        final navigator = Navigator.of(context);
+        final messenger = ScaffoldMessenger.of(context);
+        
+        await ref.read(playlistProviderInstance.notifier).deletePlaylist(
+              playlistId: widget.playlistId,
+              userId: currentUser.uid,
+            );
+        
+        if (mounted) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Playlist deleted successfully'),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+          );
+          
+          // Navigate back to home
+          navigator.pop();
+        }
+      } catch (e) {
+        if (mounted) {
+          // ignore: use_build_context_synchronously
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete playlist: $e'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
+      }
+    }
   }
 
   @override
@@ -175,7 +302,7 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                               children: [
                                 _buildInfoChip(
                                   Icons.person,
-                                  playlist.creatorName,
+                                  Helpers.getBetterDisplayName(playlist.creatorName, null),
                                 ),
                                 const SizedBox(width: 12),
                                 _buildInfoChip(
@@ -235,10 +362,11 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                 tooltip: 'Share Playlist',
               ),
               if (isCreator)
-                PopupMenuButton(
+                PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert),
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
+                  itemBuilder: (context) => <PopupMenuEntry<String>>[
+                    PopupMenuItem<String>(
+                      value: 'analytics',
                       child: const Row(
                         children: [
                           Icon(Icons.analytics, size: 20),
@@ -260,7 +388,8 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                         );
                       },
                     ),
-                    PopupMenuItem(
+                    PopupMenuItem<String>(
+                      value: 'chat',
                       child: const Row(
                         children: [
                           Icon(Icons.chat, size: 20),
@@ -282,6 +411,30 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                                 widget.playlistId,
                                 playlistName,
                               );
+                            }
+                          },
+                        );
+                      },
+                    ),
+                    const PopupMenuDivider(),
+                    PopupMenuItem<String>(
+                      value: 'delete',
+                      child: const Row(
+                        children: [
+                          Icon(Icons.delete, size: 20, color: AppTheme.errorColor),
+                          SizedBox(width: 8),
+                          Text('Delete Playlist', style: TextStyle(color: AppTheme.errorColor)),
+                        ],
+                      ),
+                      onTap: () {
+                        if (!mounted) return;
+                        final navContext = context;
+                        Future.delayed(
+                          const Duration(milliseconds: 100),
+                          () {
+                            if (mounted) {
+                              // ignore: use_build_context_synchronously
+                              _deletePlaylist(navContext);
                             }
                           },
                         );
@@ -373,7 +526,7 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                                 SizedBox(
                                   width: 80,
                                   child: Text(
-                                    participant.displayName,
+                                    Helpers.getBetterDisplayName(participant.displayName, null),
                                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                       fontSize: 11,
                                     ),
@@ -437,6 +590,9 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                   final hasUpvoted = currentUser != null &&
                       song.upvoters.contains(currentUser.uid);
 
+                  final canDelete = currentUser != null && 
+                      (isCreator || song.addedByUserId == currentUser.uid);
+
                   return SongItem(
                     song: song,
                     onTap: () => _playPreview(song),
@@ -459,6 +615,9 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                                   isUpvote: false,
                                 );
                           }
+                        : null,
+                    onDelete: canDelete
+                        ? () => _deleteSong(song)
                         : null,
                   );
                 },

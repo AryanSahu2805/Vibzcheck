@@ -5,6 +5,7 @@ import '../models/song_model.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/spotify_service.dart';
+import '../utils/logger.dart';
 
 class PlaylistProvider with ChangeNotifier {
   final FirestoreService _firestoreService = FirestoreService();
@@ -111,7 +112,7 @@ class PlaylistProvider with ChangeNotifier {
         artistName: trackData['artists'][0]['name'],
         albumName: trackData['album']['name'],
         albumArtUrl: trackData['album']['images'][0]['url'],
-        previewUrl: trackData['preview_url'],
+        previewUrl: trackData['preview_url'] as String?,
         duration: Duration(milliseconds: trackData['duration_ms']),
         addedByUserId: userId,
         addedByDisplayName: displayName,
@@ -121,6 +122,12 @@ class PlaylistProvider with ChangeNotifier {
       );
       
       await _firestoreService.addSong(playlistId: playlistId, song: song);
+      
+      // Reload playlist to update song count
+      if (playlistId == _currentPlaylist?.id) {
+        _currentPlaylist = await _firestoreService.getPlaylist(playlistId);
+        notifyListeners();
+      }
       
       // Send notification
       if (_currentPlaylist != null) {
@@ -182,6 +189,58 @@ class PlaylistProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return null;
+    }
+  }
+  
+  Future<void> deleteSong({
+    required String playlistId,
+    required String songId,
+  }) async {
+    try {
+      await _firestoreService.deleteSong(
+        playlistId: playlistId,
+        songId: songId,
+      );
+      
+      // Reload playlist to update song count
+      if (playlistId == _currentPlaylist?.id) {
+        _currentPlaylist = await _firestoreService.getPlaylist(playlistId);
+        notifyListeners();
+      }
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      Logger.error('Delete song error', e, null);
+    }
+  }
+  
+  Future<void> deletePlaylist({
+    required String playlistId,
+    required String userId,
+  }) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+      
+      await _firestoreService.deletePlaylist(
+        playlistId: playlistId,
+        userId: userId,
+      );
+      
+      // Clear current playlist if it was deleted
+      if (playlistId == _currentPlaylist?.id) {
+        _currentPlaylist = null;
+        _currentSongs = [];
+      }
+      
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      Logger.error('Delete playlist error', e, null);
+      rethrow;
     }
   }
   

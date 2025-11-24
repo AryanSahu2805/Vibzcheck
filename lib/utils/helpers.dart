@@ -60,4 +60,22 @@ class Helpers {
     if (text.length <= maxLength) return text;
     return '${text.substring(0, maxLength)}...';
   }
+
+  /// Get a better display name if the current one is "User" or empty
+  /// Falls back to email prefix if displayName is "User" or empty
+  static String getBetterDisplayName(String? displayName, String? email) {
+    if (displayName != null && displayName.isNotEmpty && displayName != 'User') {
+      return displayName;
+    }
+    
+    // Use email prefix as fallback
+    if (email != null && email.isNotEmpty) {
+      final emailPrefix = email.split('@').first;
+      if (emailPrefix.isNotEmpty) {
+        return emailPrefix;
+      }
+    }
+    
+    return 'User'; // Last resort
+  }
 }

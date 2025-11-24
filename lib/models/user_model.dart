@@ -91,10 +91,22 @@ class UserModel {
       // Use data directly (we already checked it's not null above)
       final dataMap = data;
       
+      // Get displayName, but don't default to 'User' if it's actually missing
+      // Instead, use email prefix as a better fallback
+      String displayName = getStringField(dataMap, 'displayName') ?? '';
+      if (displayName.isEmpty || displayName == 'User') {
+        final email = getStringField(dataMap, 'email') ?? '';
+        if (email.isNotEmpty) {
+          displayName = email.split('@').first;
+        } else {
+          displayName = 'User';
+        }
+      }
+      
       return UserModel(
         uid: doc.id,
         email: getStringField(dataMap, 'email') ?? '',
-        displayName: getStringField(dataMap, 'displayName') ?? 'User',
+        displayName: displayName,
         profilePicture: getStringField(dataMap, 'profilePicture'),
         spotifyId: getStringField(dataMap, 'spotifyId'),
         fcmToken: getStringField(dataMap, 'fcmToken'),

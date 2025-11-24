@@ -4,6 +4,7 @@ import '../config/theme.dart';
 import '../config/routes.dart';
 import '../models/playlist_model.dart';
 import '../providers/providers.dart';
+import '../utils/helpers.dart';
 import '../widgets/playlist_card.dart';
 import '../widgets/custom_button.dart';
 
@@ -55,7 +56,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               final playlistId = await ref.read(playlistProviderInstance.notifier).joinPlaylist(
                 shareCode: _shareCodeController.text.toUpperCase(),
                 userId: user.uid,
-                displayName: user.displayName,
+                displayName: Helpers.getBetterDisplayName(user.displayName, user.email),
                 profilePicture: user.profilePicture,
               );
 

@@ -46,19 +46,33 @@ class AudioService {
       
       // Check if already cached
       if (await file.exists()) {
+        Logger.info('✅ Using cached preview for song: $songId');
         return file;
       }
       
-      // Download preview
-      final response = await http.get(Uri.parse(previewUrl));
+      Logger.info('📥 Downloading preview for song: $songId from: $previewUrl');
+      
+      // Download preview with timeout
+      final response = await http.get(
+        Uri.parse(previewUrl),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          Logger.warning('⏱️ Preview download timeout for song: $songId');
+          throw Exception('Download timeout');
+        },
+      );
+      
       if (response.statusCode == 200) {
         await file.writeAsBytes(response.bodyBytes);
+        Logger.success('✅ Preview cached successfully for song: $songId');
         return file;
+      } else {
+        Logger.warning('⚠️ Failed to download preview: ${response.statusCode}');
+        return null;
       }
-      
-      return null;
     } catch (e) {
-      Logger.info('❌ Download and cache error: $e');
+      Logger.error('❌ Download and cache error for song $songId', e, null);
       return null;
     }
   }
@@ -73,19 +87,27 @@ class AudioService {
       await stop();
       
       if (previewUrl == null || previewUrl.isEmpty) {
-        throw Exception('No preview URL available for this song');
+        Logger.warning('⚠️ No preview URL for song: $songId');
+        throw Exception('No preview available for this song. Spotify may not have a preview for this track.');
       }
       
+      Logger.info('🎵 Playing preview for song: $songId');
       _currentSongId = songId;
       
       // Try to get cached file first
       File? audioFile = await _getCachedFile(songId);
       
-      // If not cached, download and cache
-      audioFile ??= await _downloadAndCache(songId, previewUrl);
+      if (audioFile != null) {
+        Logger.info('✅ Using cached preview');
+      } else {
+        Logger.info('📥 Downloading preview...');
+        // If not cached, download and cache
+        audioFile = await _downloadAndCache(songId, previewUrl);
+      }
       
-      if (audioFile == null) {
-        throw Exception('Failed to load preview');
+      if (audioFile == null || !await audioFile.exists()) {
+        Logger.error('❌ Failed to load preview file', null, null);
+        throw Exception('Failed to load preview. Please check your internet connection and try again.');
       }
       
       // Load and play
@@ -96,16 +118,18 @@ class AudioService {
       
       await _player.play();
       _isPlaying = true;
+      Logger.success('▶️ Preview playing');
       
       // Auto-stop after 30 seconds
       _player.positionStream.listen((position) {
         if (position >= AppConstants.previewDuration) {
+          Logger.info('⏹️ Preview finished (30 seconds)');
           stop();
         }
       });
       
     } catch (e) {
-      Logger.info('❌ Play preview error: $e');
+      Logger.error('❌ Play preview error for song $songId', e, null);
       _isPlaying = false;
       _currentSongId = null;
       rethrow;

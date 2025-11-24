@@ -222,16 +222,36 @@ class FirestoreService {
   
   // Get playlist songs (ordered by vote score)
   Stream<List<SongModel>> getPlaylistSongs(String playlistId) {
+    // Use simple query and sort manually to avoid index requirement
+    // This ensures songs are always displayed even if index is not created
     return _firestore
         .collection(AppConstants.playlistsCollection)
         .doc(playlistId)
         .collection(AppConstants.songsCollection)
-        .orderBy('voteScore', descending: true)
-        .orderBy('addedAt', descending: false)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => SongModel.fromFirestore(doc))
-            .toList());
+        .map((snapshot) {
+          final songs = snapshot.docs
+              .map((doc) {
+                try {
+                  return SongModel.fromFirestore(doc);
+                } catch (e) {
+                  Logger.warning('Error parsing song ${doc.id}: $e');
+                  return null;
+                }
+              })
+              .whereType<SongModel>()
+              .toList();
+          
+          // Sort by voteScore (descending), then by addedAt (ascending)
+          songs.sort((a, b) {
+            if (a.voteScore != b.voteScore) {
+              return b.voteScore.compareTo(a.voteScore);
+            }
+            return a.addedAt.compareTo(b.addedAt);
+          });
+          
+          return songs;
+        });
   }
   
   // Vote on song
@@ -422,6 +442,66 @@ class FirestoreService {
       });
     } catch (e) {
       Logger.info('❌ Leave playlist error: $e');
+      rethrow;
+    }
+  }
+  
+  // Delete playlist (only creator can delete)
+  Future<void> deletePlaylist({
+    required String playlistId,
+    required String userId,
+  }) async {
+    try {
+      final playlistDoc = await _firestore
+          .collection(AppConstants.playlistsCollection)
+          .doc(playlistId)
+          .get();
+      
+      if (!playlistDoc.exists) {
+        throw Exception('Playlist not found');
+      }
+      
+      final playlist = PlaylistModel.fromFirestore(playlistDoc);
+      
+      // Verify user is the creator
+      if (playlist.creatorId != userId) {
+        throw Exception('Only the playlist creator can delete this playlist');
+      }
+      
+      // Delete all subcollections (songs and chats)
+      // Note: Firestore doesn't support cascading deletes, so we need to delete manually
+      final songsSnapshot = await playlistDoc.reference
+          .collection(AppConstants.songsCollection)
+          .get();
+      
+      for (final songDoc in songsSnapshot.docs) {
+        await songDoc.reference.delete();
+      }
+      
+      final chatsSnapshot = await playlistDoc.reference
+          .collection(AppConstants.chatsCollection)
+          .get();
+      
+      for (final chatDoc in chatsSnapshot.docs) {
+        await chatDoc.reference.delete();
+      }
+      
+      // Remove playlist from all participants' playlist lists
+      for (final participant in playlist.participants) {
+        await _firestore
+            .collection(AppConstants.usersCollection)
+            .doc(participant.userId)
+            .update({
+          'playlistIds': FieldValue.arrayRemove([playlistId]),
+        });
+      }
+      
+      // Delete the playlist document
+      await playlistDoc.reference.delete();
+      
+      Logger.success('✅ Playlist deleted successfully');
+    } catch (e) {
+      Logger.info('❌ Delete playlist error: $e');
       rethrow;
     }
   }

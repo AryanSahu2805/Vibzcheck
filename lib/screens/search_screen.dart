@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../config/theme.dart';
 import '../providers/providers.dart';
-import '../services/spotify_service.dart';
+import '../utils/helpers.dart';
 import '../widgets/custom_text_field.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -16,13 +17,14 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final SpotifyService _spotifyService = SpotifyService();
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
   String? _error;
+  Timer? _debounceTimer;
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -36,9 +38,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       return;
     }
 
-    if (!_spotifyService.isAuthorized) {
+    // Get SpotifyService from provider
+    final spotifyService = ref.read(spotifyServiceProvider);
+    
+    // Check if authorized (ensureAuthorized will handle refresh if needed)
+    try {
+      await spotifyService.ensureAuthorized();
+    } catch (e) {
       setState(() {
-        _error = 'Please authorize with Spotify first';
+        _error = e.toString().replaceAll('Exception: ', '');
         _isSearching = false;
       });
       return;
@@ -50,18 +58,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
 
     try {
-      final results = await _spotifyService.searchTracks(query);
+      final results = await spotifyService.searchTracks(query);
       if (mounted) {
         setState(() {
           _searchResults = results;
           _isSearching = false;
+          if (results.isEmpty && query.trim().isNotEmpty) {
+            _error = 'No songs found. Try a different search term.';
+          }
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = e.toString().replaceAll('Exception: ', '');
           _isSearching = false;
+          _searchResults = [];
         });
       }
     }
@@ -114,7 +126,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         playlistId: widget.playlistId!,
         trackData: track,
         userId: user.uid,
-        displayName: user.displayName,
+        displayName: Helpers.getBetterDisplayName(user.displayName, user.email),
       );
 
       if (mounted) {
@@ -160,9 +172,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               prefixIcon: Icons.search,
               hint: 'Type song name, artist...',
               onChanged: (value) {
-                // Debounce search
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  if (_searchController.text == value) {
+                // Cancel previous timer
+                _debounceTimer?.cancel();
+                
+                // Debounce search - wait 800ms after user stops typing
+                _debounceTimer = Timer(const Duration(milliseconds: 800), () {
+                  if (_searchController.text == value && mounted) {
                     _searchSongs(value);
                   }
                 });
@@ -196,7 +211,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                               ),
                               textAlign: TextAlign.center,
                             ),
-                            if (_error!.contains('authorize'))
+                            if (_error!.toLowerCase().contains('authorize') ||
+                                _error!.toLowerCase().contains('expired') ||
+                                _error!.toLowerCase().contains('reconnect') ||
+                                _error!.toLowerCase().contains('connect'))
                               Column(
                                 children: [
                                   const SizedBox(height: 24),

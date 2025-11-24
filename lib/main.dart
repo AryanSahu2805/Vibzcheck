@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:app_links/app_links.dart';
 import 'config/theme.dart';
 import 'config/routes.dart';
 import 'firebase_options.dart';
@@ -162,6 +163,9 @@ void main() async {
       Logger.warning('Could not set system UI overlay style: $e');
     }
     
+    // Initialize deep link handling for Spotify OAuth
+    _initializeDeepLinks();
+    
     runApp(
       const ProviderScope(
         child: VibzcheckApp(),
@@ -224,6 +228,29 @@ void main() async {
       ),
     );
   }
+}
+
+// Initialize deep link handling for Spotify OAuth callbacks
+void _initializeDeepLinks() {
+  final appLinks = AppLinks();
+  
+  // Handle initial link (when app is opened via deep link)
+  appLinks.getInitialLink().then((uri) {
+    if (uri != null) {
+      Logger.info('App opened with deep link: $uri');
+      // The SpotifyService will handle this in its listener
+    }
+  }).catchError((error) {
+    Logger.warning('Error getting initial link: $error');
+  });
+  
+  // Listen for deep links while app is running
+  appLinks.uriLinkStream.listen((uri) {
+    Logger.info('Deep link received while app running: $uri');
+    // The SpotifyService listener will handle this
+  }, onError: (error) {
+    Logger.error('Deep link stream error', error);
+  });
 }
 
 class VibzcheckApp extends StatelessWidget {

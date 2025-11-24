@@ -4,12 +4,81 @@ import '../utils/logger.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:app_links/app_links.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/constants.dart';
 
 class SpotifyService {
   String? _accessToken;
   DateTime? _tokenExpiry;
   final _appLinks = AppLinks();
+  bool _isAuthorizing = false; // Track if we're in an active authorization flow
+  
+  bool _tokenLoadAttempted = false;
+  
+  // Initialize and load persisted token
+  SpotifyService() {
+    _loadToken();
+  }
+  
+  // Load token from SharedPreferences
+  Future<void> _loadToken() async {
+    if (_tokenLoadAttempted) return; // Prevent multiple loads
+    _tokenLoadAttempted = true;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('spotify_access_token');
+      final expiryStr = prefs.getString('spotify_token_expiry');
+      
+      if (token != null && expiryStr != null) {
+        final expiry = DateTime.parse(expiryStr);
+        if (DateTime.now().isBefore(expiry)) {
+          _accessToken = token;
+          _tokenExpiry = expiry;
+          Logger.info('✅ Loaded persisted Spotify token (expires: ${expiry.toIso8601String()})');
+        } else {
+          Logger.info('⚠️ Persisted Spotify token expired, clearing...');
+          await _clearPersistedToken();
+        }
+      } else {
+        Logger.debug('No persisted token found');
+      }
+    } catch (e) {
+      Logger.warning('Could not load persisted token: $e');
+    }
+  }
+  
+  // Ensure token is loaded before use
+  Future<void> ensureTokenLoaded() async {
+    if (!_tokenLoadAttempted) {
+      await _loadToken();
+    }
+  }
+  
+  // Save token to SharedPreferences
+  Future<void> _saveToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_accessToken != null && _tokenExpiry != null) {
+        await prefs.setString('spotify_access_token', _accessToken!);
+        await prefs.setString('spotify_token_expiry', _tokenExpiry!.toIso8601String());
+        Logger.info('✅ Persisted Spotify token');
+      }
+    } catch (e) {
+      Logger.warning('Could not persist token: $e');
+    }
+  }
+  
+  // Clear persisted token
+  Future<void> _clearPersistedToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('spotify_access_token');
+      await prefs.remove('spotify_token_expiry');
+    } catch (e) {
+      Logger.warning('Could not clear persisted token: $e');
+    }
+  }
   
   // Check if Spotify is configured (REQUIRED)
   bool get isConfigured {
@@ -48,7 +117,21 @@ class SpotifyService {
   Future<bool> authorize() async {
     try {
       isConfigured; // Validate credentials
+      
+      // Check if already authorized
+      if (isAuthorized) {
+        Logger.info('✅ Already authorized with Spotify');
+        return true;
+      }
+      
+      // Prevent multiple simultaneous authorization attempts
+      if (_isAuthorizing) {
+        Logger.warning('Authorization already in progress');
+        return false;
+      }
+      
       Logger.info('Starting Spotify authorization...');
+      _isAuthorizing = true;
       
       // Clear any existing token
       clearToken();
@@ -88,11 +171,14 @@ class SpotifyService {
       // Wait for callback
       Logger.info('Waiting for authorization callback...');
       final code = await _waitForAuthorizationCode();
+      _isAuthorizing = false; // Reset flag
+      
       if (code != null && code.isNotEmpty) {
         Logger.info('Authorization code received, exchanging for access token...');
         final success = await _exchangeCodeForToken(code);
         if (success) {
           Logger.success('Spotify authorization completed successfully!');
+          await _saveToken(); // Persist the token
         }
         return success;
       } else {
@@ -100,6 +186,7 @@ class SpotifyService {
         return false;
       }
     } catch (e, st) {
+      _isAuthorizing = false; // Reset flag on error
       Logger.error('Spotify auth error', e, st);
       return false;
     }
@@ -110,19 +197,8 @@ class SpotifyService {
     try {
       Logger.debug('Waiting for authorization callback...');
       
-      // Get the initial link if app was opened with one
-      final initialUri = await _appLinks.getInitialLink();
-      if (initialUri != null) {
-        Logger.debug('Initial link received: $initialUri');
-        if (initialUri.queryParameters.containsKey('code')) {
-          Logger.success('Authorization code found in initial link');
-          return initialUri.queryParameters['code'];
-        }
-        if (initialUri.queryParameters.containsKey('error')) {
-          Logger.error('Authorization error: ${initialUri.queryParameters['error']}');
-          return null;
-        }
-      }
+      // Don't use getInitialLink() - it returns old codes that have already been used
+      // Only listen to the stream for NEW authorization callbacks
       
       // Listen for incoming links with timeout
       Logger.debug('Listening for deep link callback...');
@@ -205,6 +281,13 @@ class SpotifyService {
         _accessToken = data['access_token'] as String?;
         final expiresIn = data['expires_in'] as int? ?? 3600;
         _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
+        
+        // Also handle refresh token if provided
+        final refreshToken = data['refresh_token'] as String?;
+        if (refreshToken != null) {
+          await _saveRefreshToken(refreshToken);
+        }
+        
         Logger.success('Spotify authorization successful!');
         return true;
       }
@@ -219,35 +302,205 @@ class SpotifyService {
   
   // Check if token is valid
   bool get isAuthorized {
-    return _accessToken != null &&
-        _tokenExpiry != null &&
-        DateTime.now().isBefore(_tokenExpiry!);
+    if (_accessToken == null || _tokenExpiry == null) {
+      return false;
+    }
+    
+    // Check if token is expired (with 5 minute buffer)
+    final now = DateTime.now();
+    final expiryWithBuffer = _tokenExpiry!.subtract(const Duration(minutes: 5));
+    
+    if (now.isAfter(expiryWithBuffer)) {
+      Logger.warning('Spotify token expired or expiring soon');
+      // Try to refresh if we have a refresh token
+      return false;
+    }
+    
+    return true;
   }
   
-  // Search tracks (REQUIRED feature)
-  Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 20}) async {
+  // Save refresh token
+  Future<void> _saveRefreshToken(String refreshToken) async {
     try {
-      isConfigured; // Validate credentials
-      if (!isAuthorized) {
-        throw Exception('Not authorized with Spotify. Please connect your Spotify account first.');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('spotify_refresh_token', refreshToken);
+    } catch (e) {
+      Logger.warning('Could not save refresh token: $e');
+    }
+  }
+  
+  // Get refresh token
+  Future<String?> _getRefreshToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('spotify_refresh_token');
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  // Refresh access token using refresh token
+  Future<bool> _refreshAccessToken() async {
+    try {
+      final refreshToken = await _getRefreshToken();
+      if (refreshToken == null) {
+        Logger.warning('No refresh token available');
+        return false;
       }
       
-      final response = await http.get(
-        Uri.parse('${AppConstants.spotifyApiUrl}/search?q=${Uri.encodeComponent(query)}&type=track&limit=$limit'),
-        headers: {'Authorization': 'Bearer $_accessToken'},
+      Logger.info('Refreshing Spotify access token...');
+      
+      final credentials = base64Encode(
+        utf8.encode('${AppConstants.spotifyClientId}:${AppConstants.spotifyClientSecret}'),
+      );
+      
+      final response = await http.post(
+        Uri.parse('https://accounts.spotify.com/api/token'),
+        headers: {
+          'Authorization': 'Basic $credentials',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: Uri(
+          queryParameters: {
+            'grant_type': 'refresh_token',
+            'refresh_token': refreshToken,
+          },
+        ).query,
       );
       
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final tracks = data['tracks']['items'] as List;
-        return tracks.cast<Map<String, dynamic>>();
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        _accessToken = data['access_token'] as String?;
+        final expiresIn = data['expires_in'] as int? ?? 3600;
+        _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
+        
+        // Save new token
+        await _saveToken();
+        
+        Logger.success('✅ Spotify token refreshed successfully');
+        return true;
       }
       
-      return [];
-    } catch (e) {
-      Logger.info('❌ Search tracks error: $e');
-      return [];
+      Logger.error('Token refresh failed: ${response.statusCode} - ${response.body}');
+      return false;
+    } catch (e, st) {
+      Logger.error('Token refresh error', e, st);
+      return false;
     }
+  }
+  
+  // Ensure token is valid, refresh if needed
+  Future<void> ensureAuthorized() async {
+    await ensureTokenLoaded();
+    
+    if (!isAuthorized) {
+      Logger.info('Token expired or missing, attempting refresh...');
+      final refreshed = await _refreshAccessToken();
+      if (!refreshed) {
+        throw Exception('Spotify authorization expired. Please reconnect your Spotify account.');
+      }
+    }
+  }
+  
+  // Search tracks (REQUIRED feature) with retry logic
+  Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 20, int maxRetries = 2}) async {
+    int attempt = 0;
+    
+    while (attempt <= maxRetries) {
+      try {
+        // Ensure token is valid and refreshed if needed
+        await ensureAuthorized();
+        
+        isConfigured; // Validate credentials
+        
+        Logger.debug('Searching for: "$query" (attempt ${attempt + 1}/${maxRetries + 1})');
+        Logger.debug('Using access token: ${_accessToken?.substring(0, 20)}...');
+        
+        final url = '${AppConstants.spotifyApiUrl}/search?q=${Uri.encodeComponent(query)}&type=track&limit=$limit';
+        Logger.debug('Search URL: $url');
+        
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {'Authorization': 'Bearer $_accessToken'},
+        );
+        
+        Logger.debug('Search response status: ${response.statusCode}');
+        
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final tracks = data['tracks']?['items'] as List?;
+          
+          if (tracks == null || tracks.isEmpty) {
+            Logger.info('No tracks found for query: "$query"');
+            return [];
+          }
+          
+          Logger.success('Found ${tracks.length} tracks for query: "$query"');
+          return tracks.cast<Map<String, dynamic>>();
+        } else if (response.statusCode == 401) {
+          Logger.error('Unauthorized (401) - token may be expired');
+          
+          // Try to refresh token on first attempt
+          if (attempt == 0) {
+            Logger.info('Attempting to refresh token...');
+            final refreshed = await _refreshAccessToken();
+            if (refreshed) {
+              attempt++;
+              continue; // Retry with new token
+            }
+          }
+          
+          // Clear token and force re-authorization
+          await clearToken();
+          throw Exception('Spotify authorization expired. Please reconnect your Spotify account.');
+        } else if (response.statusCode == 403) {
+          final errorBody = response.body;
+          Logger.warning('Forbidden (403) - attempt ${attempt + 1}/${maxRetries + 1}');
+          
+          // Check if it's a rate limit issue (retry) or user registration issue
+          if (errorBody.contains('rate limit') || errorBody.contains('too many requests')) {
+            if (attempt < maxRetries) {
+              // Rate limiting - wait and retry with exponential backoff
+              final waitTime = Duration(milliseconds: 500 * (attempt + 1));
+              Logger.info('Rate limited, waiting ${waitTime.inMilliseconds}ms before retry...');
+              await Future.delayed(waitTime);
+              attempt++;
+              continue;
+            }
+            throw Exception('Spotify rate limit exceeded. Please wait a moment and try again.');
+          }
+          
+          // User registration issue - don't retry
+          Logger.error('Forbidden (403) - user may not be registered in Spotify Developer Dashboard');
+          String errorMessage = 'Access denied by Spotify. ';
+          
+          if (errorBody.contains('user may not be registered')) {
+            errorMessage += 'Your Spotify account needs to be added to the allowed users list in the Spotify Developer Dashboard. Please contact the app developer or add your email in the dashboard settings.';
+          } else {
+            errorMessage += 'Please check your Spotify Developer Dashboard settings. The app may be in development mode and requires user registration.';
+          }
+          
+          throw Exception(errorMessage);
+        } else {
+          Logger.error('Search failed with status ${response.statusCode}: ${response.body}');
+          throw Exception('Failed to search: ${response.statusCode}');
+        }
+      } catch (e, st) {
+        if (attempt < maxRetries && e.toString().contains('rate limit')) {
+          // Retry on rate limit errors
+          final waitTime = Duration(milliseconds: 500 * (attempt + 1));
+          Logger.info('Retrying after ${waitTime.inMilliseconds}ms...');
+          await Future.delayed(waitTime);
+          attempt++;
+          continue;
+        }
+        
+        Logger.error('Search tracks error', e, st);
+        rethrow; // Re-throw so the UI can handle it
+      }
+    }
+    
+    throw Exception('Failed to search after ${maxRetries + 1} attempts');
   }
   
   // Get track details
@@ -384,8 +637,10 @@ class SpotifyService {
   }
   
   // Clear token (logout)
-  void clearToken() {
+  Future<void> clearToken() async {
     _accessToken = null;
     _tokenExpiry = null;
+    await _clearPersistedToken();
+    Logger.info('✅ Spotify token cleared');
   }
 }
