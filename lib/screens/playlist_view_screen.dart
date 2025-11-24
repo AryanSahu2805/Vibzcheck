@@ -132,6 +132,43 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
     }
   }
 
+  Future<void> _updateMoodTags(BuildContext context) async {
+    final playlistProvider = ref.read(playlistProviderInstance.notifier);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    
+    try {
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('Updating mood tags for all songs...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      
+      await playlistProvider.updateAllSongsMoodTags(
+        playlistId: widget.playlistId,
+      );
+      
+      if (context.mounted) {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('✅ Mood tags updated successfully!'),
+            backgroundColor: AppTheme.primaryColor,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Failed to update mood tags: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+  
   Future<void> _deletePlaylist(BuildContext context) async {
     final playlist = ref.read(playlistProviderInstance).currentPlaylist;
     final currentUser = ref.read(authProviderInstance).currentUser;
@@ -416,6 +453,29 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                         );
                       },
                     ),
+                    PopupMenuItem<String>(
+                      value: 'updateTags',
+                      child: const Row(
+                        children: [
+                          Icon(Icons.local_fire_department, size: 20, color: AppTheme.primaryColor),
+                          SizedBox(width: 8),
+                          Text('Update Mood Tags'),
+                        ],
+                      ),
+                      onTap: () {
+                        if (!mounted) return;
+                        final navContext = context;
+                        Future.delayed(
+                          const Duration(milliseconds: 100),
+                          () {
+                            if (mounted) {
+                              // ignore: use_build_context_synchronously
+                              _updateMoodTags(navContext);
+                            }
+                          },
+                        );
+                      },
+                    ),
                     const PopupMenuDivider(),
                     PopupMenuItem<String>(
                       value: 'delete',
@@ -587,8 +647,6 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final song = songs[index];
-                  final hasUpvoted = currentUser != null &&
-                      song.upvoters.contains(currentUser.uid);
 
                   final canDelete = currentUser != null && 
                       (isCreator || song.addedByUserId == currentUser.uid);
@@ -598,21 +656,23 @@ class _PlaylistViewScreenState extends ConsumerState<PlaylistViewScreen> {
                     onTap: () => _playPreview(song),
                     onUpvote: currentUser != null
                         ? () {
+                            // If already upvoted, remove vote. Otherwise, add upvote.
                             ref.read(playlistProviderInstance.notifier).voteSong(
                                   playlistId: widget.playlistId,
                                   songId: song.id,
                                   userId: currentUser.uid,
-                                  isUpvote: !hasUpvoted,
+                                  isUpvote: true, // Always pass true for upvote button
                                 );
                           }
                         : null,
                     onDownvote: currentUser != null
                         ? () {
+                            // If already downvoted, remove vote. Otherwise, add downvote.
                             ref.read(playlistProviderInstance.notifier).voteSong(
                                   playlistId: widget.playlistId,
                                   songId: song.id,
                                   userId: currentUser.uid,
-                                  isUpvote: false,
+                                  isUpvote: false, // Always pass false for downvote button
                                 );
                           }
                         : null,

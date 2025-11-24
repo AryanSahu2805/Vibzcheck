@@ -66,28 +66,40 @@ class SongItem extends StatelessWidget {
                       ),
                     ),
                     if (song.moodTags.isNotEmpty) ...[
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 8),
                       Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
+                        spacing: 8,
+                        runSpacing: 6,
                         children: song.moodTags.map((tag) {
                           return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
-                              color: AppTheme.primaryColor.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(12),
+                              color: AppTheme.primaryColor.withValues(alpha: 0.25),
+                              borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: AppTheme.primaryColor.withValues(alpha: 0.5),
-                                width: 1,
+                                color: AppTheme.primaryColor.withValues(alpha: 0.7),
+                                width: 1.5,
                               ),
                             ),
-                            child: Text(
-                              tag,
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: AppTheme.primaryColor,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                              ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.local_fire_department,
+                                  size: 12,
+                                  color: AppTheme.primaryColor,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  tag.toUpperCase(),
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: AppTheme.primaryColor,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
                             ),
                           );
                         }).toList(),

@@ -529,9 +529,15 @@ class SpotifyService {
   // Get audio features (for mood tagging)
   Future<Map<String, dynamic>?> getAudioFeatures(String trackId) async {
     try {
+      // Ensure token is authorized before making request
+      await ensureAuthorized();
+      
       if (!isAuthorized) {
-        throw Exception('Not authorized');
+        Logger.warning('⚠️ Not authorized to get audio features');
+        return null;
       }
+      
+      Logger.debug('Getting audio features for track: $trackId');
       
       final response = await http.get(
         Uri.parse('${AppConstants.spotifyApiUrl}/audio-features/$trackId'),
@@ -539,12 +545,74 @@ class SpotifyService {
       );
       
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final features = jsonDecode(response.body) as Map<String, dynamic>;
+        Logger.success('✅ Got audio features for track: $trackId');
+        return features;
+      } else if (response.statusCode == 401) {
+        Logger.warning('⚠️ Unauthorized (401) - token may be expired');
+        // Try to refresh token
+        final refreshed = await _refreshAccessToken();
+        if (refreshed) {
+          // Retry once
+          final retryResponse = await http.get(
+            Uri.parse('${AppConstants.spotifyApiUrl}/audio-features/$trackId'),
+            headers: {'Authorization': 'Bearer $_accessToken'},
+          );
+          if (retryResponse.statusCode == 200) {
+            return jsonDecode(retryResponse.body) as Map<String, dynamic>;
+          }
+        }
+        return null;
       }
       
+      Logger.warning('⚠️ Failed to get audio features: ${response.statusCode}');
       return null;
     } catch (e) {
-      Logger.info('❌ Get audio features error: $e');
+      Logger.error('❌ Get audio features error', e, null);
+      return null;
+    }
+  }
+  
+  // Get track details (useful for getting preview URL if missing from search)
+  Future<Map<String, dynamic>?> getTrackDetails(String trackId) async {
+    try {
+      await ensureAuthorized();
+      
+      if (!isAuthorized) {
+        Logger.warning('⚠️ Not authorized to get track details');
+        return null;
+      }
+      
+      Logger.debug('Getting track details for: $trackId');
+      
+      final response = await http.get(
+        Uri.parse('${AppConstants.spotifyApiUrl}/tracks/$trackId'),
+        headers: {'Authorization': 'Bearer $_accessToken'},
+      );
+      
+      if (response.statusCode == 200) {
+        final track = jsonDecode(response.body) as Map<String, dynamic>;
+        Logger.success('✅ Got track details for: $trackId');
+        return track;
+      } else if (response.statusCode == 401) {
+        Logger.warning('⚠️ Unauthorized (401) - token may be expired');
+        final refreshed = await _refreshAccessToken();
+        if (refreshed) {
+          final retryResponse = await http.get(
+            Uri.parse('${AppConstants.spotifyApiUrl}/tracks/$trackId'),
+            headers: {'Authorization': 'Bearer $_accessToken'},
+          );
+          if (retryResponse.statusCode == 200) {
+            return jsonDecode(retryResponse.body) as Map<String, dynamic>;
+          }
+        }
+        return null;
+      }
+      
+      Logger.warning('⚠️ Failed to get track details: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      Logger.error('❌ Get track details error', e, null);
       return null;
     }
   }
@@ -634,6 +702,146 @@ class SpotifyService {
     });
     
     return tags;
+  }
+  
+  // Fallback: Determine mood tags from track metadata (name, artist, genre)
+  List<String> getMoodTagsFromMetadata({
+    required String trackName,
+    required String artistName,
+    String? albumName,
+    List<String>? genres,
+  }) {
+    final List<String> tags = [];
+    final text = '${trackName.toLowerCase()} ${artistName.toLowerCase()} ${albumName?.toLowerCase() ?? ''} ${genres?.join(' ').toLowerCase() ?? ''}';
+    
+    // Energetic keywords
+    final energeticKeywords = [
+      'energy', 'energetic', 'power', 'powerful', 'intense', 'intensity', 'fast', 'speed',
+      'rock', 'metal', 'punk', 'hardcore', 'thrash', 'aggressive', 'loud', 'explosive',
+      'fire', 'burn', 'blast', 'crash', 'bang', 'boom', 'wild', 'furious', 'rage',
+      'adrenaline', 'pump', 'boost', 'charge', 'turbo', 'nitro', 'thunder', 'lightning'
+    ];
+    
+    // Chill keywords
+    final chillKeywords = [
+      'chill', 'relax', 'calm', 'peaceful', 'serene', 'ambient', 'ambient', 'lo-fi',
+      'lofi', 'smooth', 'soft', 'gentle', 'mellow', 'laid back', 'easy', 'quiet',
+      'zen', 'meditation', 'yoga', 'spa', 'rain', 'ocean', 'waves', 'nature',
+      'acoustic', 'unplugged', 'minimal', 'subtle', 'breeze', 'whisper'
+    ];
+    
+    // Happy keywords
+    final happyKeywords = [
+      'happy', 'joy', 'joyful', 'cheerful', 'bright', 'sunny', 'smile', 'laugh',
+      'fun', 'funny', 'party', 'celebrate', 'celebration', 'festival', 'carnival',
+      'upbeat', 'positive', 'optimistic', 'uplifting', 'inspiring', 'motivational',
+      'summer', 'beach', 'vacation', 'holiday', 'birthday', 'wedding', 'dance'
+    ];
+    
+    // Sad keywords
+    final sadKeywords = [
+      'sad', 'sorrow', 'sorrowful', 'melancholy', 'depressed', 'lonely', 'alone',
+      'heartbreak', 'breakup', 'tears', 'cry', 'crying', 'pain', 'hurt', 'ache',
+      'miss', 'missing', 'goodbye', 'farewell', 'lost', 'empty', 'dark', 'gloomy',
+      'rainy', 'winter', 'autumn', 'fall', 'blue', 'blues', 'ballad', 'slow'
+    ];
+    
+    // Party keywords
+    final partyKeywords = [
+      'party', 'club', 'dance', 'dancing', 'disco', 'house', 'edm', 'electronic',
+      'techno', 'trance', 'rave', 'festival', 'celebration', 'celebration', 'night',
+      'nightlife', 'dj', 'mix', 'remix', 'beat', 'bass', 'drop', 'banger',
+      'anthem', 'hype', 'turn up', 'turnt', 'lit', 'fire', 'hot', 'groove'
+    ];
+    
+    // Focus keywords
+    final focusKeywords = [
+      'focus', 'study', 'work', 'productivity', 'concentration', 'instrumental',
+      'classical', 'piano', 'violin', 'orchestra', 'symphony', 'jazz', 'smooth jazz',
+      'background', 'ambient', 'atmospheric', 'cinematic', 'soundtrack', 'score',
+      'minimal', 'simple', 'clean', 'pure', 'acoustic', 'unplugged', 'solo'
+    ];
+    
+    // Check for energetic
+    if (energeticKeywords.any((keyword) => text.contains(keyword))) {
+      tags.add('energetic');
+    }
+    
+    // Check for chill
+    if (chillKeywords.any((keyword) => text.contains(keyword))) {
+      tags.add('chill');
+    }
+    
+    // Check for happy
+    if (happyKeywords.any((keyword) => text.contains(keyword))) {
+      tags.add('happy');
+    }
+    
+    // Check for sad
+    if (sadKeywords.any((keyword) => text.contains(keyword))) {
+      tags.add('sad');
+    }
+    
+    // Check for party
+    if (partyKeywords.any((keyword) => text.contains(keyword))) {
+      tags.add('party');
+    }
+    
+    // Check for focus
+    if (focusKeywords.any((keyword) => text.contains(keyword))) {
+      tags.add('focus');
+    }
+    
+    // Genre-based tagging (if genres are available)
+    if (genres != null && genres.isNotEmpty) {
+      final genreText = genres.join(' ').toLowerCase();
+      
+      // Energetic genres
+      if (genreText.contains('rock') || genreText.contains('metal') || 
+          genreText.contains('punk') || genreText.contains('hardcore')) {
+        if (!tags.contains('energetic')) tags.add('energetic');
+      }
+      
+      // Chill genres
+      if (genreText.contains('ambient') || genreText.contains('lofi') || 
+          genreText.contains('chill') || genreText.contains('acoustic')) {
+        if (!tags.contains('chill')) tags.add('chill');
+      }
+      
+      // Party genres
+      if (genreText.contains('dance') || genreText.contains('edm') || 
+          genreText.contains('electronic') || genreText.contains('house') ||
+          genreText.contains('techno') || genreText.contains('pop')) {
+        if (!tags.contains('party')) tags.add('party');
+      }
+      
+      // Focus genres
+      if (genreText.contains('classical') || genreText.contains('jazz') || 
+          genreText.contains('instrumental') || genreText.contains('piano')) {
+        if (!tags.contains('focus')) tags.add('focus');
+      }
+      
+      // Happy genres
+      if (genreText.contains('pop') || genreText.contains('indie pop') || 
+          genreText.contains('folk') || genreText.contains('country')) {
+        if (!tags.contains('happy')) tags.add('happy');
+      }
+      
+      // Sad genres
+      if (genreText.contains('blues') || genreText.contains('soul') || 
+          genreText.contains('ballad') || genreText.contains('r&b')) {
+        if (!tags.contains('sad')) tags.add('sad');
+      }
+    }
+    
+    // If no tags found, add a default based on duration or other heuristics
+    if (tags.isEmpty) {
+      // Default to 'chill' if we can't determine anything
+      tags.add('chill');
+    }
+    
+    // Limit to 3 tags max to keep it clean
+    return tags.take(3).toList();
   }
   
   // Clear token (logout)

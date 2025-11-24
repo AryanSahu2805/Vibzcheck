@@ -273,22 +273,39 @@ class FirestoreService {
       
       final song = SongModel.fromFirestore(songDoc);
       
-      // Remove previous vote if exists
+      // Get current vote state
       List<String> upvoters = List.from(song.upvoters);
       List<String> downvoters = List.from(song.downvoters);
       
-      upvoters.remove(userId);
-      downvoters.remove(userId);
+      final wasUpvoted = upvoters.contains(userId);
+      final wasDownvoted = downvoters.contains(userId);
       
-      // Add new vote
+      // Toggle logic: If clicking the same button again, remove vote. Otherwise, switch vote.
       if (isUpvote) {
-        upvoters.add(userId);
+        if (wasUpvoted) {
+          // Already upvoted - remove the upvote
+          upvoters.remove(userId);
+        } else {
+          // Remove from downvoters if there, add to upvoters
+          downvoters.remove(userId);
+          upvoters.add(userId);
+        }
       } else {
-        downvoters.add(userId);
+        if (wasDownvoted) {
+          // Already downvoted - remove the downvote
+          downvoters.remove(userId);
+        } else {
+          // Remove from upvoters if there, add to downvoters
+          upvoters.remove(userId);
+          downvoters.add(userId);
+        }
       }
       
-      // Calculate new score
-      final voteScore = upvoters.length - downvoters.length;
+      // Calculate new score (ensure non-negative - votes can't go below 0)
+      int voteScore = upvoters.length - downvoters.length;
+      if (voteScore < 0) {
+        voteScore = 0; // Prevent negative votes
+      }
       
       await songRef.update({
         'upvoters': upvoters,
@@ -381,6 +398,30 @@ class FirestoreService {
             .toList()
             .reversed
             .toList());
+  }
+  
+  // Update song with mood tags (for retroactive tagging)
+  Future<void> updateSongMoodTags({
+    required String playlistId,
+    required String songId,
+    required List<String> moodTags,
+    Map<String, dynamic>? audioFeatures,
+  }) async {
+    try {
+      await _firestore
+          .collection(AppConstants.playlistsCollection)
+          .doc(playlistId)
+          .collection(AppConstants.songsCollection)
+          .doc(songId)
+          .update({
+        'moodTags': moodTags,
+        if (audioFeatures != null) 'audioFeatures': audioFeatures,
+      });
+      Logger.success('✅ Updated mood tags for song: $songId');
+    } catch (e) {
+      Logger.error('❌ Update song mood tags error', e, null);
+      rethrow;
+    }
   }
   
   // Delete song

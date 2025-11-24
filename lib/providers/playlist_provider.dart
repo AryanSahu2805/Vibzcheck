@@ -99,21 +99,107 @@ class PlaylistProvider with ChangeNotifier {
     required String displayName,
   }) async {
     try {
-      // Get audio features for mood tagging
-      final audioFeatures = await _spotifyService.getAudioFeatures(trackData['id']);
-      final moodTags = audioFeatures != null 
-          ? _spotifyService.getMoodTags(audioFeatures)
-          : <String>[];
+      final trackId = trackData['id'] as String;
+      Logger.info('🎵 Adding song: ${trackData['name']} (ID: $trackId)');
+      
+      // Extract preview URL - check both 'preview_url' and 'previewUrl'
+      String? previewUrl = trackData['preview_url'] as String?;
+      if (previewUrl == null || previewUrl.isEmpty) {
+        previewUrl = trackData['previewUrl'] as String?;
+      }
+      
+      // If preview URL is missing, try to fetch track details
+      if ((previewUrl == null || previewUrl.isEmpty) && trackId.isNotEmpty) {
+        Logger.info('📡 Preview URL missing, fetching track details...');
+        try {
+          final trackDetails = await _spotifyService.getTrackDetails(trackId);
+          if (trackDetails != null) {
+            previewUrl = trackDetails['preview_url'] as String?;
+            if (previewUrl != null && previewUrl.isNotEmpty) {
+              Logger.success('✅ Got preview URL from track details');
+            }
+          }
+        } catch (e) {
+          Logger.warning('⚠️ Could not fetch track details: $e');
+        }
+      }
+      
+      if (previewUrl != null && previewUrl.isNotEmpty) {
+        Logger.success('✅ Preview URL found: ${previewUrl.substring(0, 50)}...');
+      } else {
+        Logger.warning('⚠️ No preview URL available for: ${trackData['name']}');
+      }
+      
+      // Get audio features for mood tagging (with error handling)
+      Map<String, dynamic>? audioFeatures;
+      List<String> moodTags = [];
+      
+      try {
+        audioFeatures = await _spotifyService.getAudioFeatures(trackId);
+        if (audioFeatures != null) {
+          moodTags = _spotifyService.getMoodTags(audioFeatures);
+          Logger.success('✅ Got ${moodTags.length} mood tags from audio features: $moodTags');
+        } else {
+          Logger.warning('⚠️ Could not get audio features for track: $trackId');
+        }
+      } catch (e) {
+        Logger.warning('⚠️ Error getting audio features: $e');
+        // Will use fallback metadata-based tagging
+      }
+      
+      // Fallback: Use metadata-based mood tagging if audio features failed
+      if (moodTags.isEmpty) {
+        Logger.info('🔄 Using fallback metadata-based mood tagging...');
+        try {
+          // Extract genres from track data if available
+          final album = trackData['album'] as Map<String, dynamic>?;
+          final artists = trackData['artists'] as List<dynamic>?;
+          List<String>? genres;
+          
+          // Try to get genres from album
+          if (album != null && album.containsKey('genres')) {
+            final albumGenres = album['genres'] as List<dynamic>?;
+            if (albumGenres != null && albumGenres.isNotEmpty) {
+              genres = albumGenres.map((g) => g.toString()).toList();
+            }
+          }
+          
+          // Try to get genres from artists
+          if ((genres == null || genres.isEmpty) && artists != null && artists.isNotEmpty) {
+            final artist = artists[0] as Map<String, dynamic>?;
+            if (artist != null && artist.containsKey('genres')) {
+              final artistGenres = artist['genres'] as List<dynamic>?;
+              if (artistGenres != null && artistGenres.isNotEmpty) {
+                genres = artistGenres.map((g) => g.toString()).toList();
+              }
+            }
+          }
+          
+          moodTags = _spotifyService.getMoodTagsFromMetadata(
+            trackName: trackData['name'] as String,
+            artistName: artists != null && artists.isNotEmpty 
+                ? artists[0]['name'] as String 
+                : 'Unknown',
+            albumName: album?['name'] as String?,
+            genres: genres,
+          );
+          
+          Logger.success('✅ Generated ${moodTags.length} mood tags from metadata: $moodTags');
+        } catch (e) {
+          Logger.error('❌ Error generating mood tags from metadata', e, null);
+          // Still continue - song will be added without tags
+        }
+      }
       
       final song = SongModel(
         id: '',
-        trackId: trackData['id'],
-        trackName: trackData['name'],
-        artistName: trackData['artists'][0]['name'],
-        albumName: trackData['album']['name'],
-        albumArtUrl: trackData['album']['images'][0]['url'],
-        previewUrl: trackData['preview_url'] as String?,
-        duration: Duration(milliseconds: trackData['duration_ms']),
+        trackId: trackId,
+        trackName: trackData['name'] as String,
+        artistName: trackData['artists'][0]['name'] as String,
+        albumName: trackData['album']['name'] as String,
+        albumArtUrl: trackData['album']['images'][0]['url'] as String,
+        previewUrl: previewUrl,
+        duration: Duration(milliseconds: trackData['duration_ms'] as int),
         addedByUserId: userId,
         addedByDisplayName: displayName,
         addedAt: DateTime.now(),
@@ -122,6 +208,7 @@ class PlaylistProvider with ChangeNotifier {
       );
       
       await _firestoreService.addSong(playlistId: playlistId, song: song);
+      Logger.success('✅ Song added successfully with ${moodTags.length} mood tags');
       
       // Reload playlist to update song count
       if (playlistId == _currentPlaylist?.id) {
@@ -211,6 +298,157 @@ class PlaylistProvider with ChangeNotifier {
       _error = e.toString();
       notifyListeners();
       Logger.error('Delete song error', e, null);
+    }
+  }
+  
+  // Update song with mood tags (for retroactive tagging)
+  Future<void> updateSongMoodTags({
+    required String playlistId,
+    required String songId,
+  }) async {
+    try {
+      // Get the song to find its trackId
+      final songs = await _firestoreService.getPlaylistSongs(playlistId).first;
+      final song = songs.firstWhere((s) => s.id == songId);
+      
+      if (song.trackId.isEmpty) {
+        Logger.warning('⚠️ Song has no trackId, cannot fetch mood tags');
+        return;
+      }
+      
+      Logger.info('🔄 Fetching mood tags for song: ${song.trackName}');
+      
+      // Get audio features and generate mood tags
+      Map<String, dynamic>? audioFeatures;
+      List<String> moodTags = [];
+      
+      try {
+        audioFeatures = await _spotifyService.getAudioFeatures(song.trackId);
+        if (audioFeatures != null) {
+          moodTags = _spotifyService.getMoodTags(audioFeatures);
+          Logger.success('✅ Generated ${moodTags.length} mood tags from audio features: $moodTags');
+        }
+      } catch (e) {
+        Logger.warning('⚠️ Could not get audio features: $e');
+      }
+      
+      // Fallback to metadata-based tagging if audio features failed
+      if (moodTags.isEmpty) {
+        Logger.info('🔄 Using fallback metadata-based mood tagging...');
+        moodTags = _spotifyService.getMoodTagsFromMetadata(
+          trackName: song.trackName,
+          artistName: song.artistName,
+          albumName: song.albumName,
+          genres: null, // We don't have genre info in SongModel
+        );
+        Logger.success('✅ Generated ${moodTags.length} mood tags from metadata: $moodTags');
+      }
+      
+      // Update the song in Firestore
+      await _firestoreService.updateSongMoodTags(
+        playlistId: playlistId,
+        songId: songId,
+        moodTags: moodTags,
+        audioFeatures: audioFeatures,
+      );
+      
+      // Reload playlist to show updated tags
+      if (playlistId == _currentPlaylist?.id) {
+        await loadPlaylist(playlistId);
+      }
+    } catch (e) {
+      Logger.error('❌ Update song mood tags error', e, null);
+      _error = e.toString();
+      notifyListeners();
+    }
+  }
+  
+  // Update all songs in playlist with mood tags (for retroactive tagging)
+  Future<void> updateAllSongsMoodTags({
+    required String playlistId,
+  }) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+      
+      Logger.info('🔄 Updating mood tags for all songs in playlist...');
+      
+      // Get all songs
+      final songs = await _firestoreService.getPlaylistSongs(playlistId).first;
+      int updated = 0;
+      int failed = 0;
+      
+      for (final song in songs) {
+        // Skip if song already has mood tags
+        if (song.moodTags.isNotEmpty) {
+          Logger.debug('⏭️ Song ${song.trackName} already has mood tags, skipping');
+          continue;
+        }
+        
+        if (song.trackId.isEmpty) {
+          Logger.warning('⚠️ Song ${song.trackName} has no trackId, skipping');
+          failed++;
+          continue;
+        }
+        
+        try {
+          // Get audio features and generate mood tags
+          Map<String, dynamic>? audioFeatures;
+          List<String> moodTags = [];
+          
+          try {
+            audioFeatures = await _spotifyService.getAudioFeatures(song.trackId);
+            if (audioFeatures != null) {
+              moodTags = _spotifyService.getMoodTags(audioFeatures);
+            }
+          } catch (e) {
+            Logger.warning('⚠️ Audio features failed for ${song.trackName}, using fallback');
+          }
+          
+          // Fallback to metadata-based tagging if audio features failed
+          if (moodTags.isEmpty) {
+            moodTags = _spotifyService.getMoodTagsFromMetadata(
+              trackName: song.trackName,
+              artistName: song.artistName,
+              albumName: song.albumName,
+              genres: null,
+            );
+          }
+          
+          if (moodTags.isNotEmpty) {
+            // Update the song in Firestore
+            await _firestoreService.updateSongMoodTags(
+              playlistId: playlistId,
+              songId: song.id,
+              moodTags: moodTags,
+              audioFeatures: audioFeatures,
+            );
+            updated++;
+            Logger.success('✅ Updated tags for: ${song.trackName} - $moodTags');
+          } else {
+            failed++;
+            Logger.warning('⚠️ Could not generate mood tags for: ${song.trackName}');
+          }
+        } catch (e) {
+          failed++;
+          Logger.error('❌ Error updating tags for ${song.trackName}', e, null);
+        }
+      }
+      
+      Logger.success('✅ Updated mood tags: $updated successful, $failed failed');
+      
+      // Reload playlist to show updated tags
+      if (playlistId == _currentPlaylist?.id) {
+        await loadPlaylist(playlistId);
+      }
+      
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      Logger.error('❌ Update all songs mood tags error', e, null);
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
     }
   }
   
